@@ -127,3 +127,16 @@ cd services/bolt-service
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8005 --reload
 ```
+
+## Docker
+
+```bash
+# build image
+docker build -t auto-opt-bolt-service ./services/bolt-service
+
+# run tests in container
+docker run --rm auto-opt-bolt-service pytest -q
+
+# start service
+docker run --rm -p 8005:8005 auto-opt-bolt-service
+```

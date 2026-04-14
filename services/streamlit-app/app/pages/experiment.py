@@ -1,0 +1,219 @@
+from __future__ import annotations
+
+from typing import Any
+
+import streamlit as st
+
+from app.api_client import RecipeApiClient
+from app.components.charts import render_optical_schematic
+from app.components.inputs import slider_number_input
+
+
+OpticalSpec = tuple[str, str, float | int, float | int, float | int, float | int, str, str]
+BoltSpec = tuple[str, float, float, float, float, str]
+
+OPTICAL_SPECS: list[OpticalSpec] = [
+    ("wavelength", "wavelength (nm)", 300.0, 2000.0, 780.0, 1.0, "%.1f", "float"),
+    ("ld_tilt", "ld_tilt (deg)", -30.0, 30.0, 0.0, 0.1, "%.2f", "float"),
+    ("ld_div_fast", "ld_div_fast (deg)", 0.1, 80.0, 25.0, 0.1, "%.2f", "float"),
+    ("ld_div_slow", "ld_div_slow (deg)", 0.1, 40.0, 8.0, 0.1, "%.2f", "float"),
+    ("ld_div_fast_err", "ld_div_fast_err (deg)", -10.0, 10.0, 0.0, 0.01, "%.2f", "float"),
+    ("ld_div_slow_err", "ld_div_slow_err (deg)", -10.0, 10.0, 0.0, 0.01, "%.2f", "float"),
+    ("ld_emit_w", "ld_emit_w (mm)", 0.1, 20.0, 3.0, 0.1, "%.3f", "float"),
+    ("ld_emit_h", "ld_emit_h (mm)", 0.1, 20.0, 1.0, 0.1, "%.3f", "float"),
+    ("num_rays", "num_rays", 100, 200000, 5000, 100, "%d", "int"),
+    ("coll_r1", "coll_r1", -100.0, 100.0, -3.5, 0.1, "%.3f", "float"),
+    ("coll_r2", "coll_r2", -100.0, 100.0, -15.0, 0.1, "%.3f", "float"),
+    ("coll_k1", "coll_k1", -5.0, 5.0, -1.0, 0.01, "%.3f", "float"),
+    ("coll_k2", "coll_k2", -5.0, 5.0, 0.0, 0.01, "%.3f", "float"),
+    ("coll_t", "coll_t", 0.1, 20.0, 2.0, 0.1, "%.3f", "float"),
+    ("coll_n", "coll_n", 1.001, 3.0, 1.517, 0.001, "%.4f", "float"),
+    ("dist_ld_coll", "dist_ld_coll", 0.1, 100.0, 4.0, 0.1, "%.3f", "float"),
+    ("obj_f", "obj_f", 0.1, 100.0, 4.0, 0.1, "%.3f", "float"),
+    ("dist_coll_obj", "dist_coll_obj", 0.1, 200.0, 50.0, 0.1, "%.3f", "float"),
+    ("sensor_pos", "sensor_pos", 0.1, 50.0, 4.0, 0.1, "%.3f", "float"),
+]
+
+BOLT_SPECS: list[BoltSpec] = [
+    ("shift_x_per_nm", -0.05, 0.05, 0.001, 0.0001, "%.4f"),
+    ("shift_y_per_nm", -0.05, 0.05, 0.003, 0.0001, "%.4f"),
+    ("noise_std_x", 0.0, 0.02, 0.002, 0.0001, "%.4f"),
+    ("noise_std_y", 0.0, 0.02, 0.005, 0.0001, "%.4f"),
+]
+
+BOLT_LOWER_DEFAULTS = {
+    "shift_x_per_nm": -0.0005,
+    "shift_y_per_nm": 0.002,
+    "noise_std_x": 0.001,
+    "noise_std_y": 0.003,
+}
+
+CameraSpec = tuple[str, str, float | int, float | int, float | int, float | int, str, str]
+
+CAMERA_SPECS: list[CameraSpec] = [
+    ("pixel_w", "幅 (px)", 64, 4096, 640, 64, "%d", "int"),
+    ("pixel_h", "高さ (px)", 64, 4096, 480, 64, "%d", "int"),
+    ("pixel_pitch_um", "ピクセルピッチ (um)", 0.1, 100.0, 5.3, 0.1, "%.1f", "float"),
+    ("gaussian_sigma_px", "ガウシアン σ (px)", 0.0, 50.0, 3.0, 0.5, "%.1f", "float"),
+]
+
+
+def _format_experiment(experiment: dict[str, Any]) -> str:
+    return f"{experiment['experiment_id']} | {experiment['name']}"
+
+
+def _render_experiment_selector(experiments: list[dict[str, Any]]) -> None:
+    if not experiments:
+        st.info("実験がまだ作成されていません")
+        st.session_state["selected_experiment_id"] = None
+        return
+
+    experiment_ids = [item["experiment_id"] for item in experiments]
+    selected_id = st.session_state.get("selected_experiment_id")
+    if selected_id not in experiment_ids:
+        selected_id = experiment_ids[0]
+
+    id_to_experiment = {item["experiment_id"]: item for item in experiments}
+    index = experiment_ids.index(selected_id)
+
+    selected_id = st.selectbox(
+        "操作対象の実験",
+        options=experiment_ids,
+        index=index,
+        key="experiment_selected_id_widget",
+        format_func=lambda exp_id: _format_experiment(id_to_experiment[exp_id]),
+    )
+    st.session_state["selected_experiment_id"] = selected_id
+
+
+def _collect_optical_system() -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for name, label, min_v, max_v, default, step, fmt, value_type in OPTICAL_SPECS:
+        values[name] = slider_number_input(
+            label=label,
+            key=f"exp_opt_{name}",
+            min_value=min_v,
+            max_value=max_v,
+            default=default,
+            step=step,
+            value_type=value_type,
+            slider_format=fmt,
+        )
+    return values
+
+
+def _collect_bolt_model() -> dict[str, dict[str, float]]:
+    upper: dict[str, float] = {}
+    lower: dict[str, float] = {}
+
+    st.markdown("#### upper")
+    for name, min_v, max_v, default, step, fmt in BOLT_SPECS:
+        upper[name] = float(
+            slider_number_input(
+                label=name,
+                key=f"exp_bolt_upper_{name}",
+                min_value=min_v,
+                max_value=max_v,
+                default=default,
+                step=step,
+                value_type="float",
+                slider_format=fmt,
+            )
+        )
+
+    st.markdown("#### lower")
+    for name, min_v, max_v, default, step, fmt in BOLT_SPECS:
+        lower_default = BOLT_LOWER_DEFAULTS.get(name, default)
+        lower[name] = float(
+            slider_number_input(
+                label=name,
+                key=f"exp_bolt_lower_{name}",
+                min_value=min_v,
+                max_value=max_v,
+                default=lower_default,
+                step=step,
+                value_type="float",
+                slider_format=fmt,
+            )
+        )
+
+    return {
+        "upper": upper,
+        "lower": lower,
+    }
+
+
+def _collect_camera_settings() -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for name, label, min_v, max_v, default, step, fmt, value_type in CAMERA_SPECS:
+        values[name] = slider_number_input(
+            label=label,
+            key=f"exp_cam_{name}",
+            min_value=min_v,
+            max_value=max_v,
+            default=default,
+            step=step,
+            value_type=value_type,
+            slider_format=fmt,
+        )
+    return values
+
+
+def render(api_client: RecipeApiClient) -> None:
+    st.header("実験管理")
+
+    refresh_col, spacer_col = st.columns([1, 4])
+    with refresh_col:
+        if st.button("実験一覧を更新"):
+            st.rerun()
+    with spacer_col:
+        st.caption("GET /experiments で取得")
+
+    experiments = api_client.list_experiments()
+    if experiments is None:
+        experiments = []
+
+    if experiments:
+        st.dataframe(experiments, use_container_width=True, hide_index=True)
+    else:
+        st.info("表示できる実験がありません")
+
+    _render_experiment_selector(experiments)
+
+    st.divider()
+    st.subheader("新規実験作成")
+
+    default_name = st.session_state.get("new_experiment_name", "baseline_780nm")
+    experiment_name = st.text_input("実験名", value=default_name, key="new_experiment_name")
+
+    with st.expander("光学系パラメータ", expanded=True):
+        st.plotly_chart(render_optical_schematic(), use_container_width=True)
+        optical_system = _collect_optical_system()
+
+    with st.expander("ボルトモデルパラメータ", expanded=False):
+        bolt_model = _collect_bolt_model()
+
+    with st.expander("カメラ設定", expanded=False):
+        camera = _collect_camera_settings()
+
+    if st.button("実験を作成", type="primary"):
+        name = experiment_name.strip()
+        if not name:
+            st.warning("実験名を入力してください")
+            return
+
+        payload = {
+            "name": name,
+            "optical_system": optical_system,
+            "bolt_model": bolt_model,
+            "camera": camera,
+        }
+        created = api_client.create_experiment(payload)
+        if created is None:
+            return
+
+        experiment_id = str(created.get("experiment_id", ""))
+        if experiment_id:
+            st.session_state["selected_experiment_id"] = experiment_id
+        st.success(f"実験を作成しました: {experiment_id}")
+        st.rerun()

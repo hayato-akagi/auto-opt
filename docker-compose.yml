@@ -4,7 +4,7 @@ services:
   optics-sim:
     build: ./services/optics-sim
     ports:
-      - "8001:8001"
+      - "9001:8001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 10s
@@ -14,7 +14,7 @@ services:
   recipe-service:
     build: ./services/recipe-service
     ports:
-      - "8002:8002"
+      - "9002:8002"
     volumes:
       - results-data:/app/data
     environment:
@@ -38,7 +38,7 @@ services:
   position-service:
     build: ./services/position-service
     ports:
-      - "8004:8004"
+      - "9004:8004"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
       interval: 10s
@@ -48,7 +48,7 @@ services:
   bolt-service:
     build: ./services/bolt-service
     ports:
-      - "8005:8005"
+      - "9005:8005"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
       interval: 10s
@@ -58,7 +58,7 @@ services:
   streamlit-app:
     build: ./services/streamlit-app
     ports:
-      - "8501:8501"
+      - "9501:8501"
     environment:
       - RECIPE_SERVICE_URL=http://recipe-service:8002
     depends_on:
@@ -70,7 +70,7 @@ services:
   # controller:                    # 将来追加
   #   build: ./services/controller
   #   ports:
-  #     - "8003:8003"
+  #     - "9003:8003"
   #   environment:
   #     - RECIPE_SERVICE_URL=http://recipe-service:8002
   #   depends_on:

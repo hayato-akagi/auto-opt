@@ -1,0 +1,223 @@
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class OpticalSystem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    wavelength: float = Field(..., gt=0.0)
+    ld_tilt: float
+    ld_div_fast: float = Field(..., gt=0.0)
+    ld_div_slow: float = Field(..., gt=0.0)
+    ld_div_fast_err: float
+    ld_div_slow_err: float
+    ld_emit_w: float = Field(..., gt=0.0)
+    ld_emit_h: float = Field(..., gt=0.0)
+    num_rays: int = Field(..., ge=1, le=200000)
+
+    coll_r1: float
+    coll_r2: float
+    coll_k1: float
+    coll_k2: float
+    coll_t: float = Field(..., gt=0.0)
+    coll_n: float = Field(..., gt=1.0)
+    dist_ld_coll: float = Field(..., gt=0.0)
+
+    obj_f: float = Field(..., gt=0.0)
+    dist_coll_obj: float = Field(..., gt=0.0)
+    sensor_pos: float = Field(..., gt=0.0)
+
+
+class BoltUnitModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shift_x_per_nm: float
+    shift_y_per_nm: float
+    noise_std_x: float = Field(..., ge=0.0)
+    noise_std_y: float = Field(..., ge=0.0)
+
+
+class BoltModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    upper: BoltUnitModel
+    lower: BoltUnitModel
+
+
+class CameraSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pixel_w: int = Field(default=640, ge=64, le=4096)
+    pixel_h: int = Field(default=480, ge=64, le=4096)
+    pixel_pitch_um: float = Field(default=5.3, gt=0.0, le=100.0)
+    gaussian_sigma_px: float = Field(default=3.0, ge=0.0, le=50.0)
+
+
+class ExperimentCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1)
+    optical_system: OpticalSystem
+    bolt_model: BoltModel
+    camera: CameraSettings | None = None
+
+
+class ExperimentCreateResponse(BaseModel):
+    experiment_id: str
+    name: str
+    created_at: str
+
+
+class ExperimentSummary(BaseModel):
+    experiment_id: str
+    name: str
+    created_at: str
+
+
+class ExperimentListResponse(BaseModel):
+    experiments: list[ExperimentSummary]
+
+
+class TrialStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["manual", "control_loop"]
+    control: dict[str, Any] | None = None
+
+
+class TrialCreateResponse(BaseModel):
+    trial_id: str
+    experiment_id: str
+    mode: str
+    started_at: str
+
+
+class TrialListItem(BaseModel):
+    trial_id: str
+    mode: str
+    started_at: str
+    total_steps: int
+    completed: bool
+
+
+class TrialListResponse(BaseModel):
+    trials: list[TrialListItem]
+
+
+class StepOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    return_ray_hits: bool = False
+    return_images: bool = False
+
+
+class StepExecuteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    coll_x: float
+    coll_y: float
+    torque_upper: float = Field(..., ge=0.0, le=2.0)
+    torque_lower: float = Field(..., ge=0.0, le=2.0)
+    options: StepOptions = Field(default_factory=StepOptions)
+
+
+class StepExecuteResponse(BaseModel):
+    step_index: int
+    after_position: dict[str, float]
+    sim_after_position: dict[str, Any]
+    bolt_shift: dict[str, Any]
+    after_bolt: dict[str, float]
+    sim_after_bolt: dict[str, Any]
+    saved_to: str
+
+
+class StepRecord(BaseModel):
+    step_index: int
+    timestamp: str
+    command: dict[str, float]
+    after_position: dict[str, float]
+    sim_after_position: dict[str, Any]
+    bolt_shift: dict[str, Any]
+    after_bolt: dict[str, float]
+    sim_after_bolt: dict[str, Any]
+
+
+class StepSummary(BaseModel):
+    step_index: int
+    command: dict[str, float]
+    sim_after_position: dict[str, float | None]
+    sim_after_bolt: dict[str, float | None]
+
+
+class StepListResponse(BaseModel):
+    steps: list[StepSummary]
+
+
+class CompleteTrialResponse(BaseModel):
+    trial_id: str
+    experiment_id: str
+    mode: str
+    total_steps: int
+    final_step: dict[str, float | None] | None
+    finished_at: str
+
+
+class StepImageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phase: Literal["after_position", "after_bolt"]
+
+
+class StepImagesResponse(BaseModel):
+    ray_path_image: str
+    spot_diagram_image: str
+
+
+SweepParamName = Literal["coll_x", "coll_y", "torque_upper", "torque_lower"]
+
+
+class SweepBaseCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    coll_x: float
+    coll_y: float
+    torque_upper: float = Field(..., ge=0.0, le=2.0)
+    torque_lower: float = Field(..., ge=0.0, le=2.0)
+
+
+class SweepSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    param_name: SweepParamName
+    values: list[float] = Field(..., min_length=1)
+
+
+class SweepRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    experiment_id: str
+    base_command: SweepBaseCommand
+    sweep: SweepSpec
+
+
+class SweepResultItem(BaseModel):
+    step_index: int
+    param_value: float
+    sim_after_position: dict[str, float | None]
+    sim_after_bolt: dict[str, float | None]
+
+
+class SweepResponse(BaseModel):
+    trial_id: str
+    mode: Literal["sweep"]
+    sweep_param: SweepParamName
+    results: list[SweepResultItem]
+
+
+class HealthResponse(BaseModel):
+    status: str
+    service: str
+    version: str

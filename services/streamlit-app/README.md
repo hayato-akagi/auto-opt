@@ -1,83 +1,98 @@
 # streamlit-app
 
-光学系シミュレーションの操作・可視化 UI。Recipe Service のみと通信する。
+光学系シミュレーションの操作・可視化を行う Streamlit フロントエンドです。
+Recipe Service のみと通信し、他サービスへは直接アクセスしません。
 
-- **Port**: 8501
-- **技術スタック**: Python, Streamlit
-- **依存サービス**: recipe-service
+- Port: 8501
+- 技術スタック: Python 3.11+, Streamlit, requests, plotly
+- 依存サービス: recipe-service
 
-## 通信先
+## 実装済み画面
 
-Streamlit は **Recipe Service (`http://recipe-service:8002`) のみ**と通信する。
+1. 実験管理
+- 実験一覧表示
+- 新規実験作成（光学系パラメータ + ボルトモデル）
+- 実験選択を session_state に保持
 
-## 画面構成
+2. 手動操作
+- 試行一覧表示・新規試行開始
+- ステップ実行（coll_x, coll_y, torque_upper, torque_lower）
+- 位置調整後 / ボルト締結後の比較表示
+- 試行完了
 
-### 1. 実験管理画面
+3. スイープ
+- ベースコマンド設定
+- 対象パラメータ・範囲指定
+- 結果テーブルとグラフ表示（中心座標、RMS、vignetting はレスポンスに含まれる場合表示）
 
-- 実験一覧表示 (`GET /experiments`)
-- 新規実験作成フォーム
-  - 光学系パラメータ入力（スライダー＋数値入力）
-  - ボルトモデルパラメータ入力（ばらつき範囲含む）
-- 実験選択 → 試行一覧へ
+4. 結果閲覧
+- 実験 -> 試行 -> ステップのドリルダウン
+- ステップ一覧・詳細表示
+- 試行内の推移グラフ表示
+- 画像再取得 API の結果を base64 デコードして表示
 
-### 2. 手動操作画面
+5. 制御ループ
+- Coming Soon（スタブ）
 
-- 選択中の実験に対して手動ステップ実行
-  - XY位置スライダー
-  - 上下ボルトトルクスライダー
-  - 「実行」ボタン → `POST /experiments/{id}/trials/{id}/steps`
-- 結果表示:
-  - 位置調整後スポット / ボルト締結後スポット の並列表示
-  - スポット中心位置、RMS半径、ケラレ率
-  - スポット打点図（ray_hits がある場合）
+## ファイル構成
 
-### 3. スイープ画面
-
-- ベースパラメータ設定
-- スイープ対象パラメータ選択 + 範囲指定
-- 結果グラフ:
-  - パラメータ vs スポット中心位置
-  - パラメータ vs スポットRMS半径
-  - パラメータ vs ケラレ率
-
-### 4. 結果閲覧画面
-
-- 試行のステップ一覧
-- ステップごとの詳細データ表示
-- 試行間の比較グラフ
-
-### 5. 制御ループ画面（将来）
-
-- PIDゲイン設定
-- 制御ループ実行
-- 収束過程グラフ
-
-## API呼び出し一覧
-
-| 画面 | 操作 | API |
-|------|-----|-----|
-| 実験管理 | 一覧表示 | `GET /experiments` |
-| 実験管理 | 新規作成 | `POST /experiments` |
-| 実験管理 | 詳細表示 | `GET /experiments/{id}` |
-| 手動操作 | 試行開始 | `POST /experiments/{id}/trials` |
-| 手動操作 | ステップ実行 | `POST /experiments/{id}/trials/{id}/steps` |
-| 手動操作 | 試行完了 | `POST /experiments/{id}/trials/{id}/complete` |
-| 手動操作 | 画像取得 | `POST /experiments/{id}/trials/{id}/steps/{idx}/images` |
-| スイープ | スイープ実行 | `POST /recipes/sweep` |
-| 結果閲覧 | 試行一覧 | `GET /experiments/{id}/trials` |
-| 結果閲覧 | ステップ一覧 | `GET /experiments/{id}/trials/{id}/steps` |
-| 結果閲覧 | ステップ詳細 | `GET /experiments/{id}/trials/{id}/steps/{idx}` |
+```text
+services/streamlit-app/
+├── Dockerfile
+├── requirements.txt
+├── README.md
+└── app/
+    ├── __init__.py
+    ├── main.py
+    ├── api_client.py
+    ├── components/
+    │   ├── __init__.py
+    │   ├── inputs.py
+    │   └── charts.py
+    └── pages/
+        ├── __init__.py
+        ├── experiment.py
+        ├── manual.py
+        ├── sweep.py
+        ├── results.py
+        └── control.py
+```
 
 ## 環境変数
 
 | 変数 | デフォルト | 内容 |
-|------|----------|------|
-| `RECIPE_SERVICE_URL` | - | Recipe Service のURL |
+|------|------------|------|
+| RECIPE_SERVICE_URL | http://recipe-service:8002 | Recipe Service の URL |
 
-## 開発
+## ローカル実行
 
 ```bash
 cd services/streamlit-app
 pip install -r requirements.txt
 streamlit run app/main.py --server.port 8501
 ```
+
+## Docker 実行
+
+```bash
+cd services/streamlit-app
+docker build -t auto-opt-streamlit-app:test .
+docker run --rm -p 18501:8501 \
+  -e RECIPE_SERVICE_URL=http://host.docker.internal:18002 \
+  auto-opt-streamlit-app:test
+```
+
+Recipe Service が未起動でも UI 自体は表示されます。
+その場合、API 実行時に「Recipe Service に接続できません」を画面表示します。
+
+## 動作確認（Docker コンテナのみ）
+
+```bash
+cd services/streamlit-app
+docker build -t auto-opt-streamlit-app:test .
+docker run -d --name auto-opt-streamlit-app-run -p 18501:8501 auto-opt-streamlit-app:test
+curl -I http://localhost:18501
+docker rm -f auto-opt-streamlit-app-run
+```
+
+現時点で streamlit-app 専用の automated test は未実装です。
