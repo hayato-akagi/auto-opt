@@ -25,12 +25,15 @@ class RecipeOrchestrator:
 
         experiment = await self.storage.get_experiment(experiment_id)
         step_index = await self.storage.next_step_index(experiment_id, trial_id)
+        
+        engine_type = experiment.get("engine_type", "KrakenOS")
 
         after_position = await self.clients.apply_position(command.coll_x, command.coll_y)
 
         sim_after_position = await self.clients.simulate(
+            engine_type,
             self._build_simulation_payload(
-                optical_system=experiment["optical_system"],
+                experiment=experiment,
                 coll_x_shift=after_position["coll_x_shift"],
                 coll_y_shift=after_position["coll_y_shift"],
                 return_ray_hits=command.options.return_ray_hits,
@@ -51,8 +54,9 @@ class RecipeOrchestrator:
         }
 
         sim_after_bolt = await self.clients.simulate(
+            engine_type,
             self._build_simulation_payload(
-                optical_system=experiment["optical_system"],
+                experiment=experiment,
                 coll_x_shift=after_bolt["coll_x_shift"],
                 coll_y_shift=after_bolt["coll_y_shift"],
                 return_ray_hits=command.options.return_ray_hits,
@@ -91,8 +95,9 @@ class RecipeOrchestrator:
 
         if command.options.return_images:
             images_position = await self.clients.simulate(
+                engine_type,
                 self._build_simulation_payload(
-                    optical_system=experiment["optical_system"],
+                    experiment=experiment,
                     coll_x_shift=after_position["coll_x_shift"],
                     coll_y_shift=after_position["coll_y_shift"],
                     return_ray_hits=False,
@@ -100,8 +105,9 @@ class RecipeOrchestrator:
                 )
             )
             images_bolt = await self.clients.simulate(
+                engine_type,
                 self._build_simulation_payload(
-                    optical_system=experiment["optical_system"],
+                    experiment=experiment,
                     coll_x_shift=after_bolt["coll_x_shift"],
                     coll_y_shift=after_bolt["coll_y_shift"],
                     return_ray_hits=False,
@@ -138,13 +144,15 @@ class RecipeOrchestrator:
     ) -> dict[str, str]:
         step = await self.storage.get_step(experiment_id, trial_id, step_index)
         experiment = await self.storage.get_experiment(experiment_id)
+        engine_type = experiment.get("engine_type", "KrakenOS")
 
         shift_key = "after_position" if phase == "after_position" else "after_bolt"
         shift = step[shift_key]
 
         sim = await self.clients.simulate(
+            engine_type,
             self._build_simulation_payload(
-                optical_system=experiment["optical_system"],
+                experiment=experiment,
                 coll_x_shift=shift["coll_x_shift"],
                 coll_y_shift=shift["coll_y_shift"],
                 return_ray_hits=False,
@@ -213,18 +221,24 @@ class RecipeOrchestrator:
 
     def _build_simulation_payload(
         self,
-        optical_system: dict[str, Any],
+        experiment: dict[str, Any],
         coll_x_shift: float,
         coll_y_shift: float,
         return_ray_hits: bool,
         return_images: bool,
     ) -> dict[str, Any]:
+        optical_system = experiment["optical_system"]
         payload = dict(optical_system)
         payload["coll_x_shift"] = coll_x_shift
         payload["coll_y_shift"] = coll_y_shift
         payload["return_ray_hits"] = return_ray_hits
         payload["return_ray_path_image"] = return_images
         payload["return_spot_diagram_image"] = return_images
+        
+        # Transfer camera settings if present
+        if experiment.get("camera"):
+            payload["camera"] = experiment["camera"]
+        
         return payload
 
     def _strip_images(self, sim: dict[str, Any]) -> dict[str, Any]:

@@ -43,7 +43,10 @@
   // --- D. オプション ---
   "return_ray_hits": true,              // 光線座標データを含めるか (オプション, デフォルト false)
   "return_ray_path_image": false,       // 光路図を含めるか (オプション, デフォルト false)
-  "return_spot_diagram_image": false    // スポット図を含めるか (オプション, デフォルト false)
+  "return_spot_diagram_image": false,   // スポット図を含めるか (オプション, デフォルト false)
+
+  // --- E. カメラ設定（オプション、KrakenOS版では未使用） ---
+  "camera": null                         // CameraSettings オブジェクト（後方互換性のため受け付けるが無視される）
 }
 ```
 
@@ -83,6 +86,9 @@
   // --- 画像（要求時のみ、base64 PNG） ---
   "ray_path_image": null,
   "spot_diagram_image": null,
+
+  // --- 警告（オプション） ---
+  "spot_warnings": null,         // KrakenOS版では常にnull（将来拡張用）
 
   // --- メタ ---
   "computation_time_ms": 120

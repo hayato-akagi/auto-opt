@@ -112,6 +112,7 @@ class RecipeStorage:
         experiment = {
             "experiment_id": experiment_id,
             "name": payload.name,
+            "engine_type": payload.engine_type,
             "created_at": created_at,
             "optical_system": payload.optical_system.model_dump(),
             "bolt_model": payload.bolt_model.model_dump(),
@@ -121,6 +122,7 @@ class RecipeStorage:
         return {
             "experiment_id": experiment_id,
             "name": payload.name,
+            "engine_type": payload.engine_type,
             "created_at": created_at,
         }
 
@@ -135,6 +137,7 @@ class RecipeStorage:
                 {
                     "experiment_id": experiment["experiment_id"],
                     "name": experiment["name"],
+                    "engine_type": experiment.get("engine_type", "KrakenOS"),
                     "created_at": experiment["created_at"],
                 }
             )

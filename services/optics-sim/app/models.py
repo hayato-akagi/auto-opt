@@ -3,8 +3,18 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class CameraSettings(BaseModel):
+    """Camera settings for image generation (ignored by KrakenOS engine)."""
+    pixel_w: int = Field(default=640, ge=64, le=4096)
+    pixel_h: int = Field(default=480, ge=64, le=4096)
+    pixel_pitch_um: float = Field(default=5.3, gt=0.0, le=100.0)
+    gaussian_sigma_px: float = Field(default=3.0, ge=0.0, le=50.0)
+    fov_width_mm: float = Field(default=1.0, gt=0.0)
+    fov_height_mm: float = Field(default=1.0, gt=0.0)
+
+
 class SimulationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")  # Changed from forbid to ignore for forward compatibility
 
     wavelength: float = Field(..., gt=0.0, description="Laser wavelength in nm")
     ld_tilt: float = Field(..., description="LD tilt against optical axis in deg")
@@ -34,6 +44,8 @@ class SimulationRequest(BaseModel):
     return_ray_path_image: bool = Field(default=False)
     return_spot_diagram_image: bool = Field(default=False)
 
+    camera: CameraSettings | None = Field(default=None, description="Camera settings (ignored by KrakenOS)")
+
 
 class RayHit(BaseModel):
     x: float
@@ -41,7 +53,7 @@ class RayHit(BaseModel):
 
 
 class SimulationResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     spot_center_x: float
     spot_center_y: float
@@ -57,6 +69,8 @@ class SimulationResponse(BaseModel):
     ray_hits: list[RayHit] | None = None
     ray_path_image: str | None = None
     spot_diagram_image: str | None = None
+
+    spot_warnings: list[str] | None = Field(default=None, description="Warnings (always None for KrakenOS)")
 
     computation_time_ms: int
 

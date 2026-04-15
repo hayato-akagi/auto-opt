@@ -10,12 +10,14 @@ from .errors import DownstreamServiceError, DownstreamTimeoutError
 class DownstreamClients:
     def __init__(
         self,
-        optics_sim_url: str,
+        optics_sim_kraken_url: str,
+        optics_sim_simple_url: str,
         position_service_url: str,
         bolt_service_url: str,
         timeout_sec: float,
     ) -> None:
-        self.optics_sim_url = optics_sim_url.rstrip("/")
+        self.optics_sim_kraken_url = optics_sim_kraken_url.rstrip("/")
+        self.optics_sim_simple_url = optics_sim_simple_url.rstrip("/")
         self.position_service_url = position_service_url.rstrip("/")
         self.bolt_service_url = bolt_service_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=timeout_sec)
@@ -48,12 +50,15 @@ class DownstreamClients:
             "bolt-service",
         )
 
-    async def simulate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await self._post_json(
-            f"{self.optics_sim_url}/simulate",
-            payload,
-            "optics-sim",
-        )
+    async def simulate(self, engine_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if engine_type == "Simple":
+            url = f"{self.optics_sim_simple_url}/simulate"
+            downstream = "optics-sim-simple"
+        else:
+            url = f"{self.optics_sim_kraken_url}/simulate"
+            downstream = "optics-sim-kraken"
+        
+        return await self._post_json(url, payload, downstream)
 
     async def _post_json(
         self,

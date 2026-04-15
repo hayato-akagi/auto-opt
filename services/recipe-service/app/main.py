@@ -43,7 +43,8 @@ def create_app(
     resolved_settings = settings or Settings.from_env()
     resolved_storage = storage or RecipeStorage(resolved_settings.data_dir)
     resolved_clients = clients or DownstreamClients(
-        optics_sim_url=resolved_settings.optics_sim_url,
+        optics_sim_kraken_url=resolved_settings.optics_sim_kraken_url,
+        optics_sim_simple_url=resolved_settings.optics_sim_simple_url,
         position_service_url=resolved_settings.position_service_url,
         bolt_service_url=resolved_settings.bolt_service_url,
         timeout_sec=resolved_settings.downstream_timeout_sec,

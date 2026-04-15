@@ -30,7 +30,10 @@ def _select_experiment(api_client: RecipeApiClient) -> str | None:
         options=experiment_ids,
         index=index,
         key="manual_experiment_select",
-        format_func=lambda exp_id: f"{exp_id} | {id_to_experiment[exp_id]['name']}",
+        format_func=lambda exp_id: (
+            f"{exp_id} | {id_to_experiment[exp_id]['name']} "
+            f"({id_to_experiment[exp_id].get('engine_type', 'KrakenOS')})"
+        ),
     )
     st.session_state["selected_experiment_id"] = selected_id
     return selected_id

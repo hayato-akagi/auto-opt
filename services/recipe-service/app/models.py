@@ -54,12 +54,15 @@ class CameraSettings(BaseModel):
     pixel_h: int = Field(default=480, ge=64, le=4096)
     pixel_pitch_um: float = Field(default=5.3, gt=0.0, le=100.0)
     gaussian_sigma_px: float = Field(default=3.0, ge=0.0, le=50.0)
+    fov_width_mm: float = Field(default=1.0, gt=0.0)
+    fov_height_mm: float = Field(default=1.0, gt=0.0)
 
 
 class ExperimentCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., min_length=1)
+    engine_type: Literal["KrakenOS", "Simple"] = Field(default="Simple")
     optical_system: OpticalSystem
     bolt_model: BoltModel
     camera: CameraSettings | None = None
@@ -68,12 +71,14 @@ class ExperimentCreateRequest(BaseModel):
 class ExperimentCreateResponse(BaseModel):
     experiment_id: str
     name: str
+    engine_type: str
     created_at: str
 
 
 class ExperimentSummary(BaseModel):
     experiment_id: str
     name: str
+    engine_type: str
     created_at: str
 
 

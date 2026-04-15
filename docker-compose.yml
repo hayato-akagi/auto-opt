@@ -1,12 +1,33 @@
 version: "3.9"
 
 services:
-  optics-sim:
+  optics-sim-kraken:
     build: ./services/optics-sim
+    container_name: optics-sim-kraken
     ports:
-      - "9001:8001"
+      - "9001:8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  optics-sim-simple:
+    build: ./services/simple-optics-sim
+    container_name: optics-sim-simple
+    ports:
+      - "9011:8000"
+    environment:
+      - CAMERA_WIDTH_PX=640
+      - CAMERA_HEIGHT_PX=480
+      - CAMERA_FOV_WIDTH_MM=1.0
+      - CAMERA_FOV_HEIGHT_MM=1.0
+      - MAGNIFICATION=50.0
+      - DEFOCUS_COEFFICIENT=10.0
+      - TILT_SENSITIVITY_X=0.1
+      - TILT_SENSITIVITY_Y=0.1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -18,12 +39,15 @@ services:
     volumes:
       - results-data:/app/data
     environment:
-      - OPTICS_SIM_URL=http://optics-sim:8001
+      - OPTICS_SIM_KRAKEN_URL=http://optics-sim-kraken:8000
+      - OPTICS_SIM_SIMPLE_URL=http://optics-sim-simple:8000
       - POSITION_SERVICE_URL=http://position-service:8004
       - BOLT_SERVICE_URL=http://bolt-service:8005
       - DOWNSTREAM_TIMEOUT_SEC=30
     depends_on:
-      optics-sim:
+      optics-sim-kraken:
+        condition: service_healthy
+      optics-sim-simple:
         condition: service_healthy
       position-service:
         condition: service_healthy

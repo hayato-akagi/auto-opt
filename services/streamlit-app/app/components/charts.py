@@ -51,9 +51,209 @@ def _arrow_annotation(
     )
 
 
-def render_optical_schematic() -> go.Figure:
-    """光学系の模式図を描画し、各パラメータが対応する箇所を示す。"""
+def _render_simple_schematic() -> go.Figure:
+    """Simpleエンジン用の簡略化した光学系図を描画。
+    
+    必要なパラメータのみ表示：
+    - ld_emit_w, ld_emit_h: LD発光面サイズ
+    - ld_tilt: LD傾き
+    - 50x倍率の概念図
+    """
+    fig = go.Figure()
+    
+    # ── 光軸 ──
+    fig.add_shape(
+        type="line", x0=0, y0=0, x1=90, y1=0,
+        line=dict(color="#bbb", width=1, dash="dot"),
+    )
+    
+    # ── LD（レーザーダイオード）──
+    ld_x, ld_y = 10, 0
+    ld_w, ld_h = 4, 8  # 表示用サイズ（実際のld_emit_w/hとは縮尺が異なる）
+    
+    # LD矩形（直立状態）
+    fig.add_shape(
+        type="rect",
+        x0=ld_x - ld_w/2, y0=ld_y - ld_h/2,
+        x1=ld_x + ld_w/2, y1=ld_y + ld_h/2,
+        fillcolor="rgba(255,80,80,0.35)",
+        line=dict(color="#d32f2f", width=2),
+    )
+    
+    # LD発光面サイズの寸法線（横）
+    fig.add_annotation(
+        x=ld_x + ld_w/2, y=ld_y - ld_h/2 - 2,
+        ax=ld_x - ld_w/2, ay=ld_y - ld_h/2 - 2,
+        xref="x", yref="y", axref="x", ayref="y",
+        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1, arrowcolor="#d32f2f",
+    )
+    fig.add_annotation(
+        x=ld_x - ld_w/2, y=ld_y - ld_h/2 - 2,
+        ax=ld_x + ld_w/2, ay=ld_y - ld_h/2 - 2,
+        xref="x", yref="y", axref="x", ayref="y",
+        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1, arrowcolor="#d32f2f",
+    )
+    fig.add_annotation(
+        x=ld_x, y=ld_y - ld_h/2 - 4,
+        text="<b>ld_emit_w</b><br>(Slow軸)",
+        showarrow=False,
+        font=dict(size=10, color="#d32f2f"),
+    )
+    
+    # LD発光面サイズの寸法線（縦）
+    fig.add_annotation(
+        x=ld_x + ld_w/2 + 2, y=ld_y + ld_h/2,
+        ax=ld_x + ld_w/2 + 2, ay=ld_y - ld_h/2,
+        xref="x", yref="y", axref="x", ayref="y",
+        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1, arrowcolor="#d32f2f",
+    )
+    fig.add_annotation(
+        x=ld_x + ld_w/2 + 2, y=ld_y - ld_h/2,
+        ax=ld_x + ld_w/2 + 2, ay=ld_y + ld_h/2,
+        xref="x", yref="y", axref="x", ayref="y",
+        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1, arrowcolor="#d32f2f",
+    )
+    fig.add_annotation(
+        x=ld_x + ld_w/2 + 5, y=ld_y,
+        text="<b>ld_emit_h</b><br>(Fast軸)",
+        showarrow=False,
+        font=dict(size=10, color="#d32f2f"),
+    )
+    
+    # LD傾き角の表示
+    tilt_angle = 15  # 表示用の角度
+    tilt_radius = 6
+    fig.add_shape(
+        type="path",
+        path=f"M {ld_x},{ld_y} L {ld_x + tilt_radius},{ld_y} A {tilt_radius},{tilt_radius} 0 0,1 {ld_x + tilt_radius*np.cos(np.radians(tilt_angle))},{ld_y + tilt_radius*np.sin(np.radians(tilt_angle))} Z",
+        fillcolor="rgba(255,165,0,0.2)",
+        line=dict(color="orange", width=1.5),
+    )
+    fig.add_annotation(
+        x=ld_x + 8, y=ld_y + 2,
+        text="<b>ld_tilt</b>",
+        showarrow=False,
+        font=dict(size=10, color="orange"),
+    )
+    
+    # ── 光学系の簡略図（ブラックボックス） ──
+    optics_x = 45
+    optics_w, optics_h = 15, 16
+    fig.add_shape(
+        type="rect",
+        x0=optics_x - optics_w/2, y0=-optics_h/2,
+        x1=optics_x + optics_w/2, y1=optics_h/2,
+        fillcolor="rgba(100,150,250,0.15)",
+        line=dict(color="#1565c0", width=2, dash="dash"),
+    )
+    fig.add_annotation(
+        x=optics_x, y=0,
+        text="<b>光学系</b><br>(コリメータ+対物)<br><br>倍率: <b>50x</b>",
+        showarrow=False,
+        font=dict(size=11, color="#1565c0"),
+    )
+    
+    # ── カメラセンサ ──
+    sensor_x = 75
+    sensor_h = 14
+    fig.add_shape(
+        type="rect",
+        x0=sensor_x - 0.5, y0=-sensor_h/2,
+        x1=sensor_x + 0.5, y1=sensor_h/2,
+        fillcolor="rgba(100,100,100,0.5)",
+        line=dict(color="#333", width=2),
+    )
+    fig.add_annotation(
+        x=sensor_x, y=sensor_h/2 + 3,
+        text="<b>カメラ</b>",
+        showarrow=False,
+        font=dict(size=11, color="#333"),
+    )
+    
+    # ── 光線の流れ（簡略） ──
+    for dy in [-3, 0, 3]:
+        # LD → 光学系
+        fig.add_trace(go.Scatter(
+            x=[ld_x + ld_w/2, optics_x - optics_w/2],
+            y=[dy*0.3, dy*0.8],
+            mode="lines",
+            line=dict(color="rgba(255,0,0,0.25)", width=1.5),
+            showlegend=False, hoverinfo="skip",
+        ))
+        # 光学系 → センサ
+        fig.add_trace(go.Scatter(
+            x=[optics_x + optics_w/2, sensor_x],
+            y=[dy*0.8, dy*0.2],
+            mode="lines",
+            line=dict(color="rgba(255,0,0,0.25)", width=1.5),
+            showlegend=False, hoverinfo="skip",
+        ))
+    
+    # ── パラメータ説明ボックス ──
+    param_text = (
+        "<b>Simpleモードの必須パラメータ</b><br><br>"
+        "<b>ld_emit_w</b> (μm) — LD発光幅 (Slow軸)<br>"
+        "<b>ld_emit_h</b> (μm) — LD発光高さ (Fast軸)<br>"
+        "<b>ld_tilt</b> (deg) — LD傾き角<br><br>"
+        "⚡ その他のパラメータは自動設定されます"
+    )
+    fig.add_annotation(
+        x=45, y=22,
+        text=param_text,
+        showarrow=False,
+        font=dict(size=10, color="#333"),
+        align="left",
+        xanchor="center",
+        yanchor="bottom",
+        bordercolor="#666",
+        borderwidth=2,
+        borderpad=8,
+        bgcolor="rgba(255,255,220,0.95)",
+    )
+    
+    # ── 倍率説明 ──
+    mag_text = (
+        "💡 <b>倍率 50x</b><br>"
+        "コリメータ移動 1mm → スポット移動 50mm"
+    )
+    fig.add_annotation(
+        x=45, y=-15,
+        text=mag_text,
+        showarrow=False,
+        font=dict(size=10, color="#1565c0"),
+        align="center",
+        bordercolor="#1565c0",
+        borderwidth=1,
+        borderpad=6,
+        bgcolor="rgba(240,248,255,0.9)",
+    )
+    
+    # ── レイアウト ──
+    fig.update_layout(
+        height=450,
+        margin=dict(l=10, r=10, t=10, b=10),
+        xaxis=dict(
+            visible=False, range=[-5, 90],
+            scaleanchor="y", scaleratio=1,
+        ),
+        yaxis=dict(visible=False, range=[-20, 35]),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+    )
+    
+    return fig
 
+
+def render_optical_schematic(engine_type: str = "KrakenOS") -> go.Figure:
+    """光学系の模式図を描画し、各パラメータが対応する箇所を示す。
+    
+    Args:
+        engine_type: "Simple" or "KrakenOS". Simpleの場合は簡略版を表示。
+    """
+    
+    if engine_type == "Simple":
+        return _render_simple_schematic()
+    
     fig = go.Figure()
 
     # ── element positions (schematic, not to scale) ──

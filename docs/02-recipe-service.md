@@ -15,6 +15,7 @@
 ```jsonc
 {
   "name": "baseline_780nm",
+  "engine_type": "KrakenOS",     // "KrakenOS" | "Simple", デフォルト "KrakenOS"
   "optical_system": {
     "wavelength": 780, "ld_tilt": 0, "ld_div_fast": 25, "ld_div_slow": 8,
     "ld_div_fast_err": 0, "ld_div_slow_err": 0,
@@ -32,6 +33,14 @@
       "shift_x_per_nm": -0.0005, "shift_y_per_nm": 0.002,
       "noise_std_x": 0.001, "noise_std_y": 0.003
     }
+  },
+  "camera": {                     // オプション、null の場合は各エンジンのデフォルト設定を使用
+    "pixel_w": 640,
+    "pixel_h": 480,
+    "pixel_pitch_um": 5.3,        // KrakenOS版では未使用
+    "gaussian_sigma_px": 3.0,     // KrakenOS版では未使用
+    "fov_width_mm": 1.0,          // Simple版で使用
+    "fov_height_mm": 1.0          // Simple版で使用
   }
 }
 ```
@@ -362,11 +371,43 @@
 
 ## オーケストレーション・ロジック
 
-1つの step 実行時の内部処理:
+### エンジン選択
+
+Recipe Service は実験の `engine_type` に応じて異なる Optics Sim サービスを呼び出します：
+
+- `engine_type: "KrakenOS"`: `OPTICS_SIM_KRAKEN_URL` で指定されたエンドポイント（デフォルト: `http://optics-sim-kraken:8000`）
+- `engine_type: "Simple"`: `OPTICS_SIM_SIMPLE_URL` で指定されたエンドポイント（デフォルト: `http://optics-sim-simple:8000`）
+
+両エンジンとも同じAPI仕様（`POST /simulate`）を持つため、Recipe Service はエンジンを透過的に切り替えられます。
+
+### カメラ設定の転送
+
+実験に `camera` 設定がある場合、Optics Sim へのリクエストに `camera` フィールドを含めます：
+
+```python
+def _build_simulation_payload(experiment, coll_x_shift, coll_y_shift, ...):
+    payload = dict(experiment["optical_system"])
+    payload["coll_x_shift"] = coll_x_shift
+    payload["coll_y_shift"] = coll_y_shift
+    payload["return_ray_hits"] = return_ray_hits
+    payload["return_ray_path_image"] = return_images
+    payload["return_spot_diagram_image"] = return_images
+    
+    # カメラ設定を転送
+    if experiment.get("camera"):
+        payload["camera"] = experiment["camera"]
+    
+    return payload
+```
+
+- **KrakenOS版**: `camera` フィールドを無視（`extra="ignore"` のため問題なし）
+- **Simple版**: `camera.fov_width_mm` / `camera.fov_height_mm` を使用して画像生成
+
+### 1ステップ実行時の内部処理
 
 ```
 1. Position Service に coll_x, coll_y を送信 → coll_x_shift, coll_y_shift 取得
-2. 光学パラメータに coll_x/y_shift を適用して Optics Sim 呼び出し → 結果A
+2. 光学パラメータ + camera 設定 + coll_x/y_shift で Optics Sim 呼び出し (engine_type に応じたURL) → 結果A
 3. Bolt Service に torque_upper, torque_lower, bolt_model を送信 → delta_x, delta_y 取得
 4. coll_x_shift += delta_x, coll_y_shift += delta_y で Optics Sim 再呼び出し → 結果B
 5. step_NNN.json として結果A, 結果B を保存

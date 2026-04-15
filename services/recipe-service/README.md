@@ -35,6 +35,7 @@
 ```jsonc
 {
   "name": "baseline_780nm",
+  "engine_type": "KrakenOS",      // "KrakenOS" | "Simple", デフォルト "KrakenOS"
   "optical_system": {
     "wavelength": 780, "ld_tilt": 0, "ld_div_fast": 25, "ld_div_slow": 8,
     "ld_div_fast_err": 0, "ld_div_slow_err": 0,
@@ -52,6 +53,14 @@
       "shift_x_per_nm": -0.0005, "shift_y_per_nm": 0.002,
       "noise_std_x": 0.001, "noise_std_y": 0.003
     }
+  },
+  "camera": {                      // オプション
+    "pixel_w": 640,
+    "pixel_h": 480,
+    "pixel_pitch_um": 5.3,
+    "gaussian_sigma_px": 3.0,
+    "fov_width_mm": 1.0,
+    "fov_height_mm": 1.0
   }
 }
 ```

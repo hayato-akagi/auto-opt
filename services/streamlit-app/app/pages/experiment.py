@@ -19,8 +19,8 @@ OPTICAL_SPECS: list[OpticalSpec] = [
     ("ld_div_slow", "ld_div_slow (deg)", 0.1, 40.0, 8.0, 0.1, "%.2f", "float"),
     ("ld_div_fast_err", "ld_div_fast_err (deg)", -10.0, 10.0, 0.0, 0.01, "%.2f", "float"),
     ("ld_div_slow_err", "ld_div_slow_err (deg)", -10.0, 10.0, 0.0, 0.01, "%.2f", "float"),
-    ("ld_emit_w", "ld_emit_w (mm)", 0.1, 20.0, 3.0, 0.1, "%.3f", "float"),
-    ("ld_emit_h", "ld_emit_h (mm)", 0.1, 20.0, 1.0, 0.1, "%.3f", "float"),
+    ("ld_emit_w", "ld_emit_w (μm)", 0.1, 20.0, 3.0, 0.1, "%.3f", "float"),
+    ("ld_emit_h", "ld_emit_h (μm)", 0.1, 20.0, 1.0, 0.1, "%.3f", "float"),
     ("num_rays", "num_rays", 100, 200000, 5000, 100, "%d", "int"),
     ("coll_r1", "coll_r1", -100.0, 100.0, -3.5, 0.1, "%.3f", "float"),
     ("coll_r2", "coll_r2", -100.0, 100.0, -15.0, 0.1, "%.3f", "float"),
@@ -55,11 +55,15 @@ CAMERA_SPECS: list[CameraSpec] = [
     ("pixel_h", "高さ (px)", 64, 4096, 480, 64, "%d", "int"),
     ("pixel_pitch_um", "ピクセルピッチ (um)", 0.1, 100.0, 5.3, 0.1, "%.1f", "float"),
     ("gaussian_sigma_px", "ガウシアン σ (px)", 0.0, 50.0, 3.0, 0.5, "%.1f", "float"),
+    ("fov_width_mm", "視野幅 (mm)", 0.1, 10.0, 1.0, 0.1, "%.2f", "float"),
+    ("fov_height_mm", "視野高さ (mm)", 0.1, 10.0, 1.0, 0.1, "%.2f", "float"),
 ]
 
 
 def _format_experiment(experiment: dict[str, Any]) -> str:
-    return f"{experiment['experiment_id']} | {experiment['name']}"
+    engine = experiment.get('engine_type', 'KrakenOS')
+    engine_icon = "⚡" if engine == "Simple" else "🔬"
+    return f"{engine_icon} {experiment['experiment_id']} | {experiment['name']} ({engine})"
 
 
 def _render_experiment_selector(experiments: list[dict[str, Any]]) -> None:
@@ -86,19 +90,29 @@ def _render_experiment_selector(experiments: list[dict[str, Any]]) -> None:
     st.session_state["selected_experiment_id"] = selected_id
 
 
-def _collect_optical_system() -> dict[str, Any]:
+def _collect_optical_system(engine_type: str = "Simple") -> dict[str, Any]:
+    """Collect optical system parameters based on engine type."""
+    # Simple engine only uses: ld_emit_w, ld_emit_h, ld_tilt
+    # Other parameters get default values but are not shown to user
+    simple_required_params = {"ld_emit_w", "ld_emit_h", "ld_tilt"}
+    
     values: dict[str, Any] = {}
     for name, label, min_v, max_v, default, step, fmt, value_type in OPTICAL_SPECS:
-        values[name] = slider_number_input(
-            label=label,
-            key=f"exp_opt_{name}",
-            min_value=min_v,
-            max_value=max_v,
-            default=default,
-            step=step,
-            value_type=value_type,
-            slider_format=fmt,
-        )
+        # For Simple engine, only show required parameters
+        if engine_type == "Simple" and name not in simple_required_params:
+            # Use default value without showing UI
+            values[name] = default
+        else:
+            values[name] = slider_number_input(
+                label=label,
+                key=f"exp_opt_{name}",
+                min_value=min_v,
+                max_value=max_v,
+                default=default,
+                step=step,
+                value_type=value_type,
+                slider_format=fmt,
+            )
     return values
 
 
@@ -174,7 +188,15 @@ def render(api_client: RecipeApiClient) -> None:
         experiments = []
 
     if experiments:
-        st.dataframe(experiments, use_container_width=True, hide_index=True)
+        # 表示用にengine_typeカラムを追加
+        display_experiments = [
+            {
+                **exp,
+                "engine": exp.get("engine_type", "KrakenOS")
+            }
+            for exp in experiments
+        ]
+        st.dataframe(display_experiments, use_container_width=True, hide_index=True)
     else:
         st.info("表示できる実験がありません")
 
@@ -185,10 +207,24 @@ def render(api_client: RecipeApiClient) -> None:
 
     default_name = st.session_state.get("new_experiment_name", "baseline_780nm")
     experiment_name = st.text_input("実験名", value=default_name, key="new_experiment_name")
-
+    
+    st.markdown("### シミュレーションエンジン")
+    engine_type = st.selectbox(
+        "エンジン種別",
+        ["Simple", "KrakenOS"],
+        index=0,
+        help="Simple: 高速ガウシアンモデル（推奨） / KrakenOS: 精密な光線追跡",
+        key="new_experiment_engine_type"
+    )
+    
+    if engine_type == "Simple":
+        st.info("✨ Simpleモードでは必要最小限のパラメータ（LD発光サイズ、LD傾き）のみで高速シミュレーションが可能です")
+    else:
+        st.warning("🔬 KrakenOSモードでは全パラメータの入力が必要です（計算時間が長くなります）")
+    
     with st.expander("光学系パラメータ", expanded=True):
-        st.plotly_chart(render_optical_schematic(), use_container_width=True)
-        optical_system = _collect_optical_system()
+        st.plotly_chart(render_optical_schematic(engine_type), use_container_width=True)
+        optical_system = _collect_optical_system(engine_type)
 
     with st.expander("ボルトモデルパラメータ", expanded=False):
         bolt_model = _collect_bolt_model()
@@ -204,6 +240,7 @@ def render(api_client: RecipeApiClient) -> None:
 
         payload = {
             "name": name,
+            "engine_type": engine_type,
             "optical_system": optical_system,
             "bolt_model": bolt_model,
             "camera": camera,
@@ -213,7 +250,8 @@ def render(api_client: RecipeApiClient) -> None:
             return
 
         experiment_id = str(created.get("experiment_id", ""))
+        created_engine = created.get("engine_type", "KrakenOS")
         if experiment_id:
             st.session_state["selected_experiment_id"] = experiment_id
-        st.success(f"実験を作成しました: {experiment_id}")
+        st.success(f"✅ 実験を作成しました: {experiment_id} (エンジン: {created_engine})")
         st.rerun()
