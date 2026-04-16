@@ -127,30 +127,6 @@ def render(api_client: RecipeApiClient) -> None:
             slider_format="%.3f",
         )
     )
-    torque_upper = float(
-        slider_number_input(
-            label="torque_upper (N.m)",
-            key="manual_torque_upper",
-            min_value=0.0,
-            max_value=2.0,
-            default=0.5,
-            step=0.01,
-            value_type="float",
-            slider_format="%.2f",
-        )
-    )
-    torque_lower = float(
-        slider_number_input(
-            label="torque_lower (N.m)",
-            key="manual_torque_lower",
-            min_value=0.0,
-            max_value=2.0,
-            default=0.5,
-            step=0.01,
-            value_type="float",
-            slider_format="%.2f",
-        )
-    )
 
     run_col, complete_col = st.columns(2)
     with run_col:
@@ -160,8 +136,6 @@ def render(api_client: RecipeApiClient) -> None:
                 selected_trial_id or "",
                 coll_x=coll_x,
                 coll_y=coll_y,
-                torque_upper=torque_upper,
-                torque_lower=torque_lower,
                 return_ray_hits=True,
                 return_images=False,
             )

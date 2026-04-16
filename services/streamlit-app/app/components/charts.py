@@ -883,3 +883,100 @@ def render_camera_image(
             f"センサー範囲外の光線: {total - in_sensor}/{total} "
             f"(センサー {sensor_w_mm:.3f} × {sensor_h_mm:.3f} mm)"
         )
+
+
+def render_bolt_response_graph(
+    bolt_params: dict[str, float],
+    position_max: float,
+    title: str,
+) -> go.Figure:
+    """Render bolt response graph showing displacement vs initial position.
+    
+    Shows deterministic displacement (Δx = a_x×x0^b_x, Δy = a_y×y0^b_y) as lines
+    and noise ranges (±σ(|x0|)) as shaded bands.
+    
+    Args:
+        bolt_params: Dictionary containing a_x, b_x, a_y, b_y, noise_base_x/y, noise_prop_x/y
+        position_max: Maximum position for x-axis (mm)
+        title: Graph title
+    
+    Returns:
+        Plotly Figure object
+    """
+    # Extract parameters
+    a_x = bolt_params.get("a_x", 0.0)
+    b_x = bolt_params.get("b_x", 1.0)
+    a_y = bolt_params.get("a_y", 0.0)
+    b_y = bolt_params.get("b_y", 1.0)
+    noise_base_x = bolt_params.get("noise_base_x", 0.0)
+    noise_prop_x = bolt_params.get("noise_prop_x", 0.0)
+    noise_base_y = bolt_params.get("noise_base_y", 0.0)
+    noise_prop_y = bolt_params.get("noise_prop_y", 0.0)
+    
+    # Generate position values (symmetric around zero)
+    pos = np.linspace(-position_max, position_max, 200)
+    
+    # Calculate deterministic displacements
+    # Handle power function for negative values
+    delta_x = np.sign(pos) * a_x * (np.abs(pos) ** b_x)
+    delta_y = np.sign(pos) * a_y * (np.abs(pos) ** b_y)
+    
+    # Calculate position-dependent noise std (using absolute value for symmetry)
+    sigma_x = np.maximum(0, noise_base_x + noise_prop_x * np.abs(pos))
+    sigma_y = np.maximum(0, noise_base_y + noise_prop_y * np.abs(pos))
+    
+    # Create figure
+    fig = go.Figure()
+    
+    # Add Δx line and noise band
+    fig.add_trace(go.Scatter(
+        x=pos, y=delta_x,
+        mode="lines",
+        name="Δx",
+        line=dict(color="blue", width=2),
+        hovertemplate="x0=%{x:.3f} mm<br>Δx=%{y:.5f} mm<extra></extra>",
+    ))
+    
+    # Δx noise band (±σ_x)
+    fig.add_trace(go.Scatter(
+        x=np.concatenate([pos, pos[::-1]]),
+        y=np.concatenate([delta_x + sigma_x, (delta_x - sigma_x)[::-1]]),
+        fill="toself",
+        fillcolor="rgba(0,0,255,0.2)",
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+    
+    # Add Δy line and noise band
+    fig.add_trace(go.Scatter(
+        x=pos, y=delta_y,
+        mode="lines",
+        name="Δy",
+        line=dict(color="red", width=2),
+        hovertemplate="x0=%{x:.3f} mm<br>Δy=%{y:.5f} mm<extra></extra>",
+    ))
+    
+    # Δy noise band (±σ_y)
+    fig.add_trace(go.Scatter(
+        x=np.concatenate([pos, pos[::-1]]),
+        y=np.concatenate([delta_y + sigma_y, (delta_y - sigma_y)[::-1]]),
+        fill="toself",
+        fillcolor="rgba(255,0,0,0.2)",
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+    
+    # Layout
+    fig.update_layout(
+        title=title,
+        xaxis_title="初期位置 x0 (mm)",
+        yaxis_title="変位 (mm)",
+        height=350,
+        margin=dict(l=50, r=20, t=40, b=50),
+        legend=dict(x=0.02, y=0.98, bgcolor="rgba(255,255,255,0.8)"),
+        hovermode="x unified",
+    )
+    
+    return fig

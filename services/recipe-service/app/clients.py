@@ -34,16 +34,16 @@ class DownstreamClients:
 
     async def apply_bolt(
         self,
-        torque_upper: float,
-        torque_lower: float,
+        x0: float,
+        y0: float,
         bolt_model: dict[str, Any],
         random_seed: int | None,
     ) -> dict[str, Any]:
         return await self._post_json(
             f"{self.bolt_service_url}/bolt/apply",
             {
-                "torque_upper": torque_upper,
-                "torque_lower": torque_lower,
+                "x0": x0,
+                "y0": y0,
                 "bolt_model": bolt_model,
                 "random_seed": random_seed,
             },

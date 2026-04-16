@@ -11,8 +11,6 @@ from app.components.inputs import slider_number_input
 SWEEP_DEFAULTS = {
     "coll_x": {"start": -0.1, "stop": 0.1, "step": 0.01},
     "coll_y": {"start": -0.1, "stop": 0.1, "step": 0.01},
-    "torque_upper": {"start": 0.0, "stop": 2.0, "step": 0.1},
-    "torque_lower": {"start": 0.0, "stop": 2.0, "step": 0.1},
 }
 
 
@@ -133,35 +131,10 @@ def render(api_client: RecipeApiClient) -> None:
             slider_format="%.3f",
         )
     )
-    torque_upper = float(
-        slider_number_input(
-            label="torque_upper (N.m)",
-            key="sweep_torque_upper",
-            min_value=0.0,
-            max_value=2.0,
-            default=0.5,
-            step=0.01,
-            value_type="float",
-            slider_format="%.2f",
-        )
-    )
-    torque_lower = float(
-        slider_number_input(
-            label="torque_lower (N.m)",
-            key="sweep_torque_lower",
-            min_value=0.0,
-            max_value=2.0,
-            default=0.5,
-            step=0.01,
-            value_type="float",
-            slider_format="%.2f",
-        )
-    )
-
     st.subheader("スイープ設定")
     param_name = st.selectbox(
         "対象パラメータ",
-        options=["coll_x", "coll_y", "torque_upper", "torque_lower"],
+        options=["coll_x", "coll_y"],
         key="sweep_param_name",
     )
 
@@ -207,8 +180,6 @@ def render(api_client: RecipeApiClient) -> None:
             "base_command": {
                 "coll_x": coll_x,
                 "coll_y": coll_y,
-                "torque_upper": torque_upper,
-                "torque_lower": torque_lower,
             },
             "sweep": {
                 "param_name": param_name,

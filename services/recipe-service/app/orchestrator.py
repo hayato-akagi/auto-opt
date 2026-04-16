@@ -28,37 +28,44 @@ class RecipeOrchestrator:
         
         engine_type = experiment.get("engine_type", "KrakenOS")
 
+        # Get actual position from position-service (x0, y0 before bolt fastening)
         after_position = await self.clients.apply_position(command.coll_x, command.coll_y)
+        x0 = after_position["actual_x"]
+        y0 = after_position["actual_y"]
 
         sim_after_position = await self.clients.simulate(
             engine_type,
             self._build_simulation_payload(
                 experiment=experiment,
-                coll_x_shift=after_position["coll_x_shift"],
-                coll_y_shift=after_position["coll_y_shift"],
+                coll_x_shift=x0,
+                coll_y_shift=y0,
                 return_ray_hits=command.options.return_ray_hits,
                 return_images=False,
             )
         )
 
+        # Apply bolt with initial position (x0, y0)
         bolt_shift = await self.clients.apply_bolt(
-            torque_upper=command.torque_upper,
-            torque_lower=command.torque_lower,
+            x0=x0,
+            y0=y0,
             bolt_model=experiment["bolt_model"],
             random_seed=None,
         )
 
+        # Final position after bolt fastening
+        final_x = x0 + bolt_shift["delta_x"]
+        final_y = y0 + bolt_shift["delta_y"]
         after_bolt = {
-            "coll_x_shift": after_position["coll_x_shift"] + bolt_shift["delta_x"],
-            "coll_y_shift": after_position["coll_y_shift"] + bolt_shift["delta_y"],
+            "final_x": final_x,
+            "final_y": final_y,
         }
 
         sim_after_bolt = await self.clients.simulate(
             engine_type,
             self._build_simulation_payload(
                 experiment=experiment,
-                coll_x_shift=after_bolt["coll_x_shift"],
-                coll_y_shift=after_bolt["coll_y_shift"],
+                coll_x_shift=final_x,
+                coll_y_shift=final_y,
                 return_ray_hits=command.options.return_ray_hits,
                 return_images=False,
             )
@@ -70,12 +77,10 @@ class RecipeOrchestrator:
             command={
                 "coll_x": command.coll_x,
                 "coll_y": command.coll_y,
-                "torque_upper": command.torque_upper,
-                "torque_lower": command.torque_lower,
             },
             after_position={
-                "coll_x_shift": after_position["coll_x_shift"],
-                "coll_y_shift": after_position["coll_y_shift"],
+                "actual_x": x0,
+                "actual_y": y0,
             },
             sim_after_position=self._strip_images(sim_after_position),
             bolt_shift={
@@ -98,8 +103,8 @@ class RecipeOrchestrator:
                 engine_type,
                 self._build_simulation_payload(
                     experiment=experiment,
-                    coll_x_shift=after_position["coll_x_shift"],
-                    coll_y_shift=after_position["coll_y_shift"],
+                    coll_x_shift=x0,
+                    coll_y_shift=y0,
                     return_ray_hits=False,
                     return_images=True,
                 )
@@ -108,8 +113,8 @@ class RecipeOrchestrator:
                 engine_type,
                 self._build_simulation_payload(
                     experiment=experiment,
-                    coll_x_shift=after_bolt["coll_x_shift"],
-                    coll_y_shift=after_bolt["coll_y_shift"],
+                    coll_x_shift=final_x,
+                    coll_y_shift=final_y,
                     return_ray_hits=False,
                     return_images=True,
                 )
@@ -120,8 +125,8 @@ class RecipeOrchestrator:
         return {
             "step_index": step_index,
             "after_position": {
-                "coll_x_shift": after_position["coll_x_shift"],
-                "coll_y_shift": after_position["coll_y_shift"],
+                "actual_x": x0,
+                "actual_y": y0,
             },
             "sim_after_position": response_sim_after_position,
             "bolt_shift": {

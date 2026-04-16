@@ -5,7 +5,7 @@ from typing import Any
 import streamlit as st
 
 from app.api_client import RecipeApiClient
-from app.components.charts import render_optical_schematic
+from app.components.charts import render_optical_schematic, render_bolt_response_graph
 from app.components.inputs import slider_number_input
 
 
@@ -35,17 +35,28 @@ OPTICAL_SPECS: list[OpticalSpec] = [
 ]
 
 BOLT_SPECS: list[BoltSpec] = [
-    ("shift_x_per_nm", -0.05, 0.05, 0.001, 0.0001, "%.4f"),
-    ("shift_y_per_nm", -0.05, 0.05, 0.003, 0.0001, "%.4f"),
-    ("noise_std_x", 0.0, 0.02, 0.002, 0.0001, "%.4f"),
-    ("noise_std_y", 0.0, 0.02, 0.005, 0.0001, "%.4f"),
+    # X direction power-law coefficients
+    ("a_x", -0.5, 0.5, 0.05, 0.001, "%.3f"),
+    ("b_x", 0.01, 2.0, 1.0, 0.01, "%.2f"),
+    # Y direction power-law coefficients
+    ("a_y", -0.5, 0.5, 0.08, 0.001, "%.3f"),
+    ("b_y", 0.01, 2.0, 1.0, 0.01, "%.2f"),
+    # Position-dependent noise
+    ("noise_base_x", 0.0, 0.01, 0.002, 0.0001, "%.4f"),
+    ("noise_prop_x", 0.0, 0.005, 0.001, 0.0001, "%.4f"),
+    ("noise_base_y", 0.0, 0.01, 0.005, 0.0001, "%.4f"),
+    ("noise_prop_y", 0.0, 0.005, 0.002, 0.0001, "%.4f"),
 ]
 
 BOLT_LOWER_DEFAULTS = {
-    "shift_x_per_nm": -0.0005,
-    "shift_y_per_nm": 0.002,
-    "noise_std_x": 0.001,
-    "noise_std_y": 0.003,
+    "a_x": -0.03,
+    "b_x": 1.0,
+    "a_y": 0.05,
+    "b_y": 1.0,
+    "noise_base_x": 0.001,
+    "noise_prop_x": 0.0005,
+    "noise_base_y": 0.003,
+    "noise_prop_y": 0.001,
 }
 
 CameraSpec = tuple[str, str, float | int, float | int, float | int, float | int, str, str]
@@ -117,14 +128,44 @@ def _collect_optical_system(engine_type: str = "Simple") -> dict[str, Any]:
 
 
 def _collect_bolt_model() -> dict[str, dict[str, float]]:
+    """Collect bolt model parameters (v3.0: position-dependent power-law)."""
+    
+    # Position range setting (at the top)
+    st.markdown("#### 位置範囲設定（グラフ表示用）")
+    position_max = st.slider(
+        "最大位置 (mm)",
+        min_value=0.1,
+        max_value=1.5,
+        value=1.0,
+        step=0.05,
+        key="exp_bolt_position_max",
+        help="グラフのX軸最大値を設定"
+    )
+    
+    # Initialize parameter dictionaries with defaults for initial graph display
     upper: dict[str, float] = {}
     lower: dict[str, float] = {}
+    
+    # Parameter labels with descriptions
+    param_labels = {
+        "a_x": "a_x — X方向係数 (無次元)",
+        "b_x": "b_x — X方向べき指数 (1=線形, <1=飽和, >1=加速)",
+        "a_y": "a_y — Y方向係数 (無次元)",
+        "b_y": "b_y — Y方向べき指数 (1=線形, <1=飽和, >1=加速)",
+        "noise_base_x": "noise_base_x — X軸ベースノイズ (mm)",
+        "noise_prop_x": "noise_prop_x — X軸位置比例ノイズ (無次元)",
+        "noise_base_y": "noise_base_y — Y軸ベースノイズ (mm)",
+        "noise_prop_y": "noise_prop_y — Y軸位置比例ノイズ (無次元)",
+    }
 
-    st.markdown("#### upper")
+    # Collect upper parameters
+    st.markdown("#### upper ボルト パラメータ")
+    st.caption("Δx = a_x × x0^b_x + N(0, (σ_base_x + σ_prop_x × |x0|)²)")
     for name, min_v, max_v, default, step, fmt in BOLT_SPECS:
+        label = param_labels.get(name, name)
         upper[name] = float(
             slider_number_input(
-                label=name,
+                label=label,
                 key=f"exp_bolt_upper_{name}",
                 min_value=min_v,
                 max_value=max_v,
@@ -135,12 +176,22 @@ def _collect_bolt_model() -> dict[str, dict[str, float]]:
             )
         )
 
-    st.markdown("#### lower")
+    # Display upper graph immediately after parameters
+    st.markdown("##### Upper ボルト応答")
+    fig_upper = render_bolt_response_graph(upper, position_max, "Upper ボルト応答")
+    st.plotly_chart(fig_upper, use_container_width=True)
+
+    st.markdown("---")
+
+    # Collect lower parameters
+    st.markdown("#### lower ボルト パラメータ")
+    st.caption("Δy = a_y × y0^b_y + N(0, (σ_base_y + σ_prop_y × |y0|)²)")
     for name, min_v, max_v, default, step, fmt in BOLT_SPECS:
+        label = param_labels.get(name, name)
         lower_default = BOLT_LOWER_DEFAULTS.get(name, default)
         lower[name] = float(
             slider_number_input(
-                label=name,
+                label=label,
                 key=f"exp_bolt_lower_{name}",
                 min_value=min_v,
                 max_value=max_v,
@@ -150,6 +201,11 @@ def _collect_bolt_model() -> dict[str, dict[str, float]]:
                 slider_format=fmt,
             )
         )
+
+    # Display lower graph immediately after parameters
+    st.markdown("##### Lower ボルト応答")
+    fig_lower = render_bolt_response_graph(lower, position_max, "Lower ボルト応答")
+    st.plotly_chart(fig_lower, use_container_width=True)
 
     return {
         "upper": upper,

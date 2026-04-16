@@ -7,8 +7,8 @@ class PositionApplyRequest(BaseModel):
 
 
 class PositionApplyResponse(BaseModel):
-    coll_x_shift: float = Field(..., description="Effective X shift in mm")
-    coll_y_shift: float = Field(..., description="Effective Y shift in mm")
+    actual_x: float = Field(..., description="Actual X position in mm")
+    actual_y: float = Field(..., description="Actual Y position in mm")
 
 
 class HealthResponse(BaseModel):

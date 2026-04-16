@@ -26,12 +26,14 @@
   },
   "bolt_model": {
     "upper": {
-      "shift_x_per_nm": 0.001, "shift_y_per_nm": 0.003,
-      "noise_std_x": 0.002, "noise_std_y": 0.005
+      "a_x": 0.05, "b_x": 1.0, "a_y": 0.08, "b_y": 1.0,
+      "noise_base_x": 0.002, "noise_prop_x": 0.001,
+      "noise_base_y": 0.005, "noise_prop_y": 0.002
     },
     "lower": {
-      "shift_x_per_nm": -0.0005, "shift_y_per_nm": 0.002,
-      "noise_std_x": 0.001, "noise_std_y": 0.003
+      "a_x": -0.03, "b_x": 1.0, "a_y": 0.05, "b_y": 1.0,
+      "noise_base_x": 0.001, "noise_prop_x": 0.0005,
+      "noise_base_y": 0.003, "noise_prop_y": 0.001
     }
   },
   "camera": {                     // オプション、null の場合は各エンジンのデフォルト設定を使用
@@ -107,10 +109,11 @@
 > **Sim レスポンスの透過**: `sim_after_position` / `sim_after_bolt` は Optics Sim のレスポンスをそのまま含む（`spot_center_x/y`, `spot_rms_radius`, `spot_geo_radius`, `spot_peak_x/y`, `num_rays_launched`, `num_rays_arrived`, `vignetting_ratio`, `computation_time_ms`）。
 > Recipe Service が独自にフィールドを加工・選択することはない。
 
-> **命令値と実効値の区別**:
+> **命令値と実際値の区別**:
 > - リクエストの `coll_x`, `coll_y` は **命令値**（ユーザーが指定した位置）
-> - `after_position.coll_x_shift`, `coll_y_shift` は **実効値**（Position Service が返した実際のズレ）
-> - 現時点ではパススルーのため同一値だが、将来 Position Service に非線形性が入ると乖離する
+> - `after_position.actual_x`, `actual_y` は **実際の到達位置**（Position Service が返した値）
+> - 現時点ではパススルーのため同一値だが、将来 Position Service に誤差が入ると乖離する
+> - `actual_x`, `actual_y` がボルト締結前の初期位置 `(x0, y0)` として Bolt Service に渡される
 
 #### Request Body
 
@@ -118,8 +121,6 @@
 {
   "coll_x": 0.02,              // mm, 命令レンズX位置
   "coll_y": -0.05,             // mm, 命令レンズY位置
-  "torque_upper": 0.5,         // N·m, 上ボルトトルク
-  "torque_lower": 0.5,         // N·m, 下ボルトトルク
   "options": {
     "return_ray_hits": false,   // オプション, デフォルト false
     "return_images": false      // オプション, デフォルト false
@@ -146,8 +147,8 @@
   "step_index": 0,
 
   "after_position": {
-    "coll_x_shift": 0.02,
-    "coll_y_shift": -0.05
+    "actual_x": 0.02,
+    "actual_y": -0.05
   },
   "sim_after_position": {
     "spot_center_x": 0.005,
@@ -169,8 +170,8 @@
     "used_seed": 1234567890
   },
   "after_bolt": {
-    "coll_x_shift": 0.023,
-    "coll_y_shift": -0.042
+    "final_x": 0.023,
+    "final_y": -0.042
   },
   "sim_after_bolt": {
     "spot_center_x": 0.012,
@@ -220,7 +221,7 @@
   "steps": [
     {
       "step_index": 0,
-      "command": {"coll_x": 0.02, "coll_y": -0.05, "torque_upper": 0.5, "torque_lower": 0.5},
+      "command": {"coll_x": 0.02, "coll_y": -0.05},
       "sim_after_position": {"spot_center_x": 0.005, "spot_center_y": -0.038, "spot_rms_radius": 0.006},
       "sim_after_bolt": {"spot_center_x": 0.012, "spot_center_y": -0.042, "spot_rms_radius": 0.005}
     }
@@ -302,8 +303,7 @@
 {
   "experiment_id": "exp_001",
   "base_command": {
-    "coll_x": 0.0, "coll_y": 0.0,
-    "torque_upper": 0.5, "torque_lower": 0.5
+    "coll_x": 0.0, "coll_y": 0.0
   },
   "sweep": {
     "param_name": "coll_y",
@@ -406,9 +406,9 @@ def _build_simulation_payload(experiment, coll_x_shift, coll_y_shift, ...):
 ### 1ステップ実行時の内部処理
 
 ```
-1. Position Service に coll_x, coll_y を送信 → coll_x_shift, coll_y_shift 取得
-2. 光学パラメータ + camera 設定 + coll_x/y_shift で Optics Sim 呼び出し (engine_type に応じたURL) → 結果A
-3. Bolt Service に torque_upper, torque_lower, bolt_model を送信 → delta_x, delta_y 取得
-4. coll_x_shift += delta_x, coll_y_shift += delta_y で Optics Sim 再呼び出し → 結果B
+1. Position Service に coll_x, coll_y を送信 → actual_x, actual_y 取得（ボルト締結前の初期位置 = x0, y0）
+2. 光学パラメータ + camera 設定 + actual_x/y で Optics Sim 呼び出し (engine_type に応じたURL) → 結果A
+3. Bolt Service に x0, y0, bolt_model を送信 → delta_x, delta_y 取得
+4. final_x = actual_x + delta_x, final_y = actual_y + delta_y で Optics Sim 再呼び出し → 結果B
 5. step_NNN.json として結果A, 結果B を保存
 ```

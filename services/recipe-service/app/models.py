@@ -32,12 +32,20 @@ class OpticalSystem(BaseModel):
 
 
 class BoltUnitModel(BaseModel):
+    """Bolt unit model with position-dependent power-law displacement."""
     model_config = ConfigDict(extra="forbid")
 
-    shift_x_per_nm: float
-    shift_y_per_nm: float
-    noise_std_x: float = Field(..., ge=0.0)
-    noise_std_y: float = Field(..., ge=0.0)
+    # Power-law coefficients: Δx = a_x × x0^b_x, Δy = a_y × y0^b_y
+    a_x: float = Field(..., ge=-0.5, le=0.5)
+    b_x: float = Field(..., gt=0.0, le=2.0)
+    a_y: float = Field(..., ge=-0.5, le=0.5)
+    b_y: float = Field(..., gt=0.0, le=2.0)
+    
+    # Position-dependent noise: σ(|x0|) = σ_base + σ_prop × |x0|
+    noise_base_x: float = Field(..., ge=0.0)
+    noise_prop_x: float = Field(..., ge=0.0)
+    noise_base_y: float = Field(..., ge=0.0)
+    noise_prop_y: float = Field(..., ge=0.0)
 
 
 class BoltModel(BaseModel):
@@ -124,8 +132,6 @@ class StepExecuteRequest(BaseModel):
 
     coll_x: float
     coll_y: float
-    torque_upper: float = Field(..., ge=0.0, le=2.0)
-    torque_lower: float = Field(..., ge=0.0, le=2.0)
     options: StepOptions = Field(default_factory=StepOptions)
 
 
@@ -181,7 +187,7 @@ class StepImagesResponse(BaseModel):
     spot_diagram_image: str
 
 
-SweepParamName = Literal["coll_x", "coll_y", "torque_upper", "torque_lower"]
+SweepParamName = Literal["coll_x", "coll_y"]
 
 
 class SweepBaseCommand(BaseModel):
@@ -189,8 +195,6 @@ class SweepBaseCommand(BaseModel):
 
     coll_x: float
     coll_y: float
-    torque_upper: float = Field(..., ge=0.0, le=2.0)
-    torque_lower: float = Field(..., ge=0.0, le=2.0)
 
 
 class SweepSpec(BaseModel):

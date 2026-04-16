@@ -8,10 +8,10 @@ app = FastAPI(title="position-service", version="0.1.0")
 
 @app.post("/position/apply", response_model=PositionApplyResponse)
 async def apply_position_endpoint(payload: PositionApplyRequest) -> PositionApplyResponse:
-    coll_x_shift, coll_y_shift = apply_position(payload.coll_x, payload.coll_y)
+    actual_x, actual_y = apply_position(payload.coll_x, payload.coll_y)
     return PositionApplyResponse(
-        coll_x_shift=coll_x_shift,
-        coll_y_shift=coll_y_shift,
+        actual_x=actual_x,
+        actual_y=actual_y,
     )
 
 

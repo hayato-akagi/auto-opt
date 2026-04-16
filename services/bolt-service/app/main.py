@@ -9,8 +9,8 @@ app = FastAPI(title="bolt-service", version="0.1.0")
 @app.post("/bolt/apply", response_model=BoltResult)
 async def apply_bolt_endpoint(payload: BoltApplyRequest) -> BoltResult:
     return apply_bolt(
-        torque_upper=payload.torque_upper,
-        torque_lower=payload.torque_lower,
+        x0=payload.x0,
+        y0=payload.y0,
         bolt_model=payload.bolt_model,
         random_seed=payload.random_seed,
     )

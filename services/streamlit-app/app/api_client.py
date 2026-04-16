@@ -102,16 +102,12 @@ class RecipeApiClient:
         *,
         coll_x: float,
         coll_y: float,
-        torque_upper: float,
-        torque_lower: float,
         return_ray_hits: bool = False,
         return_images: bool = False,
     ) -> dict[str, Any] | None:
         payload = {
             "coll_x": coll_x,
             "coll_y": coll_y,
-            "torque_upper": torque_upper,
-            "torque_lower": torque_lower,
             "options": {
                 "return_ray_hits": return_ray_hits,
                 "return_images": return_images,
