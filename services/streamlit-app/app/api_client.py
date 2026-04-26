@@ -13,11 +13,17 @@ class RecipeApiClient:
             base_url
             or os.getenv("RECIPE_SERVICE_URL", "http://recipe-service:8002")
         ).rstrip("/")
+        self.simple_controller_url = os.getenv(
+            "SIMPLE_CONTROLLER_URL", "http://simple-controller:8003"
+        ).rstrip("/")
         self.timeout_sec = timeout_sec
         self.session = requests.Session()
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
+
+    def _controller_url(self, path: str) -> str:
+        return f"{self.simple_controller_url}{path}"
 
     def _request(
         self,
@@ -94,6 +100,9 @@ class RecipeApiClient:
             return trials
         st.error("Recipe Service の試行一覧レスポンス形式が不正です")
         return None
+
+    def get_trial(self, experiment_id: str, trial_id: str) -> dict[str, Any] | None:
+        return self._request("GET", f"/experiments/{experiment_id}/trials/{trial_id}")
 
     def execute_step(
         self,
@@ -172,3 +181,60 @@ class RecipeApiClient:
 
     def run_sweep(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         return self._request("POST", "/recipes/sweep", payload)
+
+    def _request_controller(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        try:
+            response = self.session.request(
+                method=method,
+                url=self._controller_url(path),
+                json=payload,
+                timeout=self.timeout_sec,
+            )
+            response.raise_for_status()
+            if not response.text:
+                return {}
+            return response.json()
+        except requests.exceptions.ConnectionError:
+            st.error("simple-controller に接続できません")
+        except requests.exceptions.Timeout:
+            st.error("simple-controller への通信がタイムアウトしました")
+        except requests.exceptions.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else "?"
+            detail = ""
+            if exc.response is not None:
+                try:
+                    body = exc.response.json()
+                    if isinstance(body, dict):
+                        detail = str(body.get("detail", ""))
+                except ValueError:
+                    detail = exc.response.text
+            message = f"simple-controller エラー ({status})"
+            if detail:
+                message = f"{message}: {detail}"
+            st.error(message)
+        except requests.exceptions.RequestException as exc:
+            st.error(f"simple-controller 通信エラー: {exc}")
+        except ValueError:
+            st.error("simple-controller から不正な JSON レスポンスを受信しました")
+        return None
+
+    def control_run(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        return self._request_controller("POST", "/control/run", payload)
+
+    def control_step(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        return self._request_controller("POST", "/control/step", payload)
+
+    def control_algorithms(self) -> list[dict[str, Any]] | None:
+        data = self._request_controller("GET", "/control/algorithms")
+        if data is None:
+            return None
+        algorithms = data.get("algorithms")
+        if isinstance(algorithms, list):
+            return algorithms
+        st.error("simple-controller のアルゴリズム一覧レスポンス形式が不正です")
+        return None

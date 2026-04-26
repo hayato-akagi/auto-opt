@@ -66,7 +66,7 @@ def render(api_client: RecipeApiClient) -> None:
 
     st.subheader("試行管理")
     if trials:
-        st.dataframe(trials, use_container_width=True, hide_index=True)
+        st.dataframe(trials, width="stretch", hide_index=True)
     else:
         st.info("この実験にはまだ試行がありません")
 

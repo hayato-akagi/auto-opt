@@ -40,6 +40,7 @@ def main() -> None:
     st.sidebar.title("auto-opt")
     st.sidebar.caption("Recipe Service only")
     st.sidebar.caption(f"RECIPE_SERVICE_URL: {api_client.base_url}")
+    st.sidebar.caption(f"SIMPLE_CONTROLLER_URL: {api_client.simple_controller_url}")
 
     page_name = st.sidebar.radio("ページ", options=list(PAGES.keys()))
     PAGES[page_name](api_client)

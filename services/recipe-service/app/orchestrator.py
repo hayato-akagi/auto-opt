@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from .clients import DownstreamClients
 from .errors import DownstreamServiceError, TrialAlreadyCompletedError
 from .models import StepExecuteRequest, StepRecord, SweepRequest
 from .storage import RecipeStorage, utc_now_iso
+
+
+def _bolt_seed(trial_id: str, step_index: int) -> int:
+    """Derive a deterministic 32-bit seed from trial_id and step_index.
+
+    The same (trial_id, step_index) always produces the same seed, so bolt
+    noise is reproducible within a trial while remaining independent across
+    different trials.
+    """
+    key = f"{trial_id}:{step_index}".encode()
+    digest = hashlib.sha256(key).digest()
+    return int.from_bytes(digest[:4], "big")
 
 
 class RecipeOrchestrator:
@@ -44,12 +57,14 @@ class RecipeOrchestrator:
             )
         )
 
-        # Apply bolt with initial position (x0, y0)
+        # Apply bolt with initial position (x0, y0).
+        # Seed is derived from (trial_id, step_index) so that bolt noise is
+        # reproducible within a trial but independent across different trials.
         bolt_shift = await self.clients.apply_bolt(
             x0=x0,
             y0=y0,
             bolt_model=experiment["bolt_model"],
-            random_seed=None,
+            random_seed=_bolt_seed(trial_id, step_index),
         )
 
         # Final position after bolt fastening

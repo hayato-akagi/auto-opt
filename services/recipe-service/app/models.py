@@ -32,8 +32,16 @@ class OpticalSystem(BaseModel):
 
 
 class BoltUnitModel(BaseModel):
-    """Bolt unit model with position-dependent power-law displacement."""
+    """Bolt unit model with initial-position bias + position-dependent power-law displacement.
+    
+    x_eff = x0 + x0_bias_x
+    Δx = sign(x_eff) × a_x × |x_eff|^b_x
+    """
     model_config = ConfigDict(extra="forbid")
+
+    # Bias added to initial position before power-law evaluation.
+    x0_bias_x: float = Field(default=0.0)
+    x0_bias_y: float = Field(default=0.0)
 
     # Power-law coefficients: Δx = a_x × x0^b_x, Δy = a_y × y0^b_y
     a_x: float = Field(..., ge=-0.5, le=0.5)
@@ -41,11 +49,17 @@ class BoltUnitModel(BaseModel):
     a_y: float = Field(..., ge=-0.5, le=0.5)
     b_y: float = Field(..., gt=0.0, le=2.0)
     
-    # Position-dependent noise: σ(|x0|) = σ_base + σ_prop × |x0|
-    noise_base_x: float = Field(..., ge=0.0)
-    noise_prop_x: float = Field(..., ge=0.0)
-    noise_base_y: float = Field(..., ge=0.0)
-    noise_prop_y: float = Field(..., ge=0.0)
+    # Relative noise ratio (deterministic displacement ±[min,max]%)
+    noise_ratio_min_x: float = Field(default=0.01, ge=0.0, le=1.0)
+    noise_ratio_max_x: float = Field(default=0.05, ge=0.0, le=1.0)
+    noise_ratio_min_y: float = Field(default=0.01, ge=0.0, le=1.0)
+    noise_ratio_max_y: float = Field(default=0.05, ge=0.0, le=1.0)
+
+    # Deprecated legacy parameters kept optional for backward compatibility.
+    noise_base_x: float = Field(default=0.0, ge=0.0)
+    noise_prop_x: float = Field(default=0.0, ge=0.0)
+    noise_base_y: float = Field(default=0.0, ge=0.0)
+    noise_prop_y: float = Field(default=0.0, ge=0.0)
 
 
 class BoltModel(BaseModel):

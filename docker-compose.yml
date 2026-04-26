@@ -85,21 +85,28 @@ services:
       - "9501:8501"
     environment:
       - RECIPE_SERVICE_URL=http://recipe-service:8002
+      - SIMPLE_CONTROLLER_URL=http://simple-controller:8003
     depends_on:
       recipe-service:
         condition: service_healthy
     volumes:
       - results-data:/app/data:ro
 
-  # controller:                    # 将来追加
-  #   build: ./services/controller
-  #   ports:
-  #     - "9003:8003"
-  #   environment:
-  #     - RECIPE_SERVICE_URL=http://recipe-service:8002
-  #   depends_on:
-  #     recipe-service:
-  #       condition: service_healthy
+  simple-controller:
+    build: ./services/simple-controller
+    ports:
+      - "9003:8003"
+    environment:
+      - RECIPE_SERVICE_URL=http://recipe-service:8002
+      - DOWNSTREAM_TIMEOUT_SEC=30
+    depends_on:
+      recipe-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 volumes:
   results-data:

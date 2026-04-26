@@ -35,28 +35,33 @@ OPTICAL_SPECS: list[OpticalSpec] = [
 ]
 
 BOLT_SPECS: list[BoltSpec] = [
+    # Initial-position bias (evaluated before power-law)
+    ("x0_bias_x", -0.2, 0.2, 0.0, 0.001, "%.4f"),
+    ("x0_bias_y", -0.2, 0.2, 0.0, 0.001, "%.4f"),
     # X direction power-law coefficients
-    ("a_x", -0.5, 0.5, 0.05, 0.001, "%.3f"),
+    ("a_x", -0.5, 0.5, 0.02, 0.001, "%.3f"),
     ("b_x", 0.01, 2.0, 1.0, 0.01, "%.2f"),
     # Y direction power-law coefficients
-    ("a_y", -0.5, 0.5, 0.08, 0.001, "%.3f"),
+    ("a_y", -0.5, 0.5, 0.02, 0.001, "%.3f"),
     ("b_y", 0.01, 2.0, 1.0, 0.01, "%.2f"),
-    # Position-dependent noise
-    ("noise_base_x", 0.0, 0.01, 0.002, 0.0001, "%.4f"),
-    ("noise_prop_x", 0.0, 0.005, 0.001, 0.0001, "%.4f"),
-    ("noise_base_y", 0.0, 0.01, 0.005, 0.0001, "%.4f"),
-    ("noise_prop_y", 0.0, 0.005, 0.002, 0.0001, "%.4f"),
+    # Relative noise ratio (deterministic displacement ±[min,max]%)
+    ("noise_ratio_min_x", 0.0, 0.2, 0.01, 0.001, "%.3f"),
+    ("noise_ratio_max_x", 0.0, 0.2, 0.05, 0.001, "%.3f"),
+    ("noise_ratio_min_y", 0.0, 0.2, 0.01, 0.001, "%.3f"),
+    ("noise_ratio_max_y", 0.0, 0.2, 0.05, 0.001, "%.3f"),
 ]
 
 BOLT_LOWER_DEFAULTS = {
-    "a_x": -0.03,
+    "x0_bias_x": 0.0,
+    "x0_bias_y": 0.0,
+    "a_x": 0.02,
     "b_x": 1.0,
-    "a_y": 0.05,
+    "a_y": 0.02,
     "b_y": 1.0,
-    "noise_base_x": 0.001,
-    "noise_prop_x": 0.0005,
-    "noise_base_y": 0.003,
-    "noise_prop_y": 0.001,
+    "noise_ratio_min_x": 0.01,
+    "noise_ratio_max_x": 0.05,
+    "noise_ratio_min_y": 0.01,
+    "noise_ratio_max_y": 0.05,
 }
 
 CameraSpec = tuple[str, str, float | int, float | int, float | int, float | int, str, str]
@@ -148,19 +153,21 @@ def _collect_bolt_model() -> dict[str, dict[str, float]]:
     
     # Parameter labels with descriptions
     param_labels = {
+        "x0_bias_x": "x0_bias_x — X初期位置バイアス (mm)",
+        "x0_bias_y": "x0_bias_y — Y初期位置バイアス (mm)",
         "a_x": "a_x — X方向係数 (無次元)",
         "b_x": "b_x — X方向べき指数 (1=線形, <1=飽和, >1=加速)",
         "a_y": "a_y — Y方向係数 (無次元)",
         "b_y": "b_y — Y方向べき指数 (1=線形, <1=飽和, >1=加速)",
-        "noise_base_x": "noise_base_x — X軸ベースノイズ (mm)",
-        "noise_prop_x": "noise_prop_x — X軸位置比例ノイズ (無次元)",
-        "noise_base_y": "noise_base_y — Y軸ベースノイズ (mm)",
-        "noise_prop_y": "noise_prop_y — Y軸位置比例ノイズ (無次元)",
+        "noise_ratio_min_x": "noise_ratio_min_x — Xノイズ最小割合 (例: 0.01=1%)",
+        "noise_ratio_max_x": "noise_ratio_max_x — Xノイズ最大割合 (例: 0.05=5%)",
+        "noise_ratio_min_y": "noise_ratio_min_y — Yノイズ最小割合 (例: 0.01=1%)",
+        "noise_ratio_max_y": "noise_ratio_max_y — Yノイズ最大割合 (例: 0.05=5%)",
     }
 
     # Collect upper parameters
     st.markdown("#### upper ボルト パラメータ")
-    st.caption("Δx = a_x × x0^b_x + N(0, (σ_base_x + σ_prop_x × |x0|)²)")
+    st.caption("x_eff = x0 + x0_bias_x,  Δx_det = sign(x_eff) × a_x × |x_eff|^b_x,  Δx = Δx_det × (1 + r_x), r_x ∈ ±[min,max]")
     for name, min_v, max_v, default, step, fmt in BOLT_SPECS:
         label = param_labels.get(name, name)
         upper[name] = float(
@@ -179,13 +186,13 @@ def _collect_bolt_model() -> dict[str, dict[str, float]]:
     # Display upper graph immediately after parameters
     st.markdown("##### Upper ボルト応答")
     fig_upper = render_bolt_response_graph(upper, position_max, "Upper ボルト応答")
-    st.plotly_chart(fig_upper, use_container_width=True)
+    st.plotly_chart(fig_upper, width="stretch")
 
     st.markdown("---")
 
     # Collect lower parameters
     st.markdown("#### lower ボルト パラメータ")
-    st.caption("Δy = a_y × y0^b_y + N(0, (σ_base_y + σ_prop_y × |y0|)²)")
+    st.caption("y_eff = y0 + x0_bias_y,  Δy_det = sign(y_eff) × a_y × |y_eff|^b_y,  Δy = Δy_det × (1 + r_y), r_y ∈ ±[min,max]")
     for name, min_v, max_v, default, step, fmt in BOLT_SPECS:
         label = param_labels.get(name, name)
         lower_default = BOLT_LOWER_DEFAULTS.get(name, default)
@@ -205,7 +212,7 @@ def _collect_bolt_model() -> dict[str, dict[str, float]]:
     # Display lower graph immediately after parameters
     st.markdown("##### Lower ボルト応答")
     fig_lower = render_bolt_response_graph(lower, position_max, "Lower ボルト応答")
-    st.plotly_chart(fig_lower, use_container_width=True)
+    st.plotly_chart(fig_lower, width="stretch")
 
     return {
         "upper": upper,
@@ -252,7 +259,7 @@ def render(api_client: RecipeApiClient) -> None:
             }
             for exp in experiments
         ]
-        st.dataframe(display_experiments, use_container_width=True, hide_index=True)
+        st.dataframe(display_experiments, width="stretch", hide_index=True)
     else:
         st.info("表示できる実験がありません")
 
@@ -279,7 +286,7 @@ def render(api_client: RecipeApiClient) -> None:
         st.warning("🔬 KrakenOSモードでは全パラメータの入力が必要です（計算時間が長くなります）")
     
     with st.expander("光学系パラメータ", expanded=True):
-        st.plotly_chart(render_optical_schematic(engine_type), use_container_width=True)
+        st.plotly_chart(render_optical_schematic(engine_type), width="stretch")
         optical_system = _collect_optical_system(engine_type)
 
     with st.expander("ボルトモデルパラメータ", expanded=False):

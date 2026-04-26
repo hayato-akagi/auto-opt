@@ -5,12 +5,22 @@ class BoltUnitModel(BaseModel):
     """Bolt unit model parameters for position-dependent power-law displacement.
     
     Displacement model:
-        Δx = a_x × x0^b_x + N(0, σ_x(|x0|)²)
-        Δy = a_y × y0^b_y + N(0, σ_y(|y0|)²)
+        x_eff = x0 + x0_bias_x
+        y_eff = y0 + x0_bias_y
+        Δ_det_x = sign(x_eff) × a_x × |x_eff|^b_x
+        Δ_det_y = sign(y_eff) × a_y × |y_eff|^b_y
+        r_x ~ Uniform([noise_ratio_min_x, noise_ratio_max_x]) with random sign ±
+        r_y ~ Uniform([noise_ratio_min_y, noise_ratio_max_y]) with random sign ±
+        Δx = Δ_det_x × (1 + r_x)
+        Δy = Δ_det_y × (1 + r_y)
     
-    Position-dependent noise:
-        σ(|x0|) = max(0, σ_base + σ_prop × |x0|)
+    Noise is multiplicative relative noise on deterministic displacement.
     """
+    # Bias added to initial position before power-law evaluation.
+    # This creates non-zero displacement near x0=0 without adding direct delta offsets.
+    x0_bias_x: float = Field(default=0.0, description="X initial-position bias (mm)")
+    x0_bias_y: float = Field(default=0.0, description="Y initial-position bias (mm)")
+
     # Power-law coefficients for X direction
     a_x: float = Field(..., ge=-0.5, le=0.5, description="X direction coefficient (dimensionless)")
     b_x: float = Field(..., gt=0.0, le=2.0, description="X direction power exponent (dimensionless)")
@@ -19,11 +29,17 @@ class BoltUnitModel(BaseModel):
     a_y: float = Field(..., ge=-0.5, le=0.5, description="Y direction coefficient (dimensionless)")
     b_y: float = Field(..., gt=0.0, le=2.0, description="Y direction power exponent (dimensionless)")
     
-    # Position-dependent noise: σ(|x0|) = σ_base + σ_prop × |x0|
-    noise_base_x: float = Field(..., ge=0.0, description="X-axis base noise (mm)")
-    noise_prop_x: float = Field(..., ge=0.0, description="X-axis position-proportional noise (dimensionless)")
-    noise_base_y: float = Field(..., ge=0.0, description="Y-axis base noise (mm)")
-    noise_prop_y: float = Field(..., ge=0.0, description="Y-axis position-proportional noise (dimensionless)")
+    # Relative noise ratio (deterministic displacement ±[min,max]%)
+    noise_ratio_min_x: float = Field(default=0.01, ge=0.0, le=1.0, description="X-axis minimum relative noise ratio")
+    noise_ratio_max_x: float = Field(default=0.05, ge=0.0, le=1.0, description="X-axis maximum relative noise ratio")
+    noise_ratio_min_y: float = Field(default=0.01, ge=0.0, le=1.0, description="Y-axis minimum relative noise ratio")
+    noise_ratio_max_y: float = Field(default=0.05, ge=0.0, le=1.0, description="Y-axis maximum relative noise ratio")
+
+    # Deprecated legacy parameters kept for backward compatibility.
+    noise_base_x: float = Field(default=0.0, ge=0.0, description="[Deprecated] X-axis base noise (mm)")
+    noise_prop_x: float = Field(default=0.0, ge=0.0, description="[Deprecated] X-axis position-proportional noise")
+    noise_base_y: float = Field(default=0.0, ge=0.0, description="[Deprecated] Y-axis base noise (mm)")
+    noise_prop_y: float = Field(default=0.0, ge=0.0, description="[Deprecated] Y-axis position-proportional noise")
 
 
 class BoltModel(BaseModel):

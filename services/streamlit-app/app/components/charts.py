@@ -539,7 +539,7 @@ def plot_sweep_charts(results: list[dict[str, Any]], sweep_param: str) -> None:
         yaxis_title="spot center",
         legend_title="series",
     )
-    st.plotly_chart(center_fig, use_container_width=True)
+    st.plotly_chart(center_fig, width="stretch")
 
     radius_fig = go.Figure()
     radius_fig.add_trace(
@@ -564,7 +564,7 @@ def plot_sweep_charts(results: list[dict[str, Any]], sweep_param: str) -> None:
         yaxis_title="spot_rms_radius",
         legend_title="series",
     )
-    st.plotly_chart(radius_fig, use_container_width=True)
+    st.plotly_chart(radius_fig, width="stretch")
 
     has_vignetting = any(v is not None for v in pos_vig + bolt_vig)
     if not has_vignetting:
@@ -597,7 +597,7 @@ def plot_sweep_charts(results: list[dict[str, Any]], sweep_param: str) -> None:
         yaxis_title="vignetting_ratio",
         legend_title="series",
     )
-    st.plotly_chart(vignetting_fig, use_container_width=True)
+    st.plotly_chart(vignetting_fig, width="stretch")
 
 
 def plot_trial_step_charts(steps: list[dict[str, Any]]) -> None:
@@ -664,7 +664,7 @@ def plot_trial_step_charts(steps: list[dict[str, Any]]) -> None:
         yaxis_title="spot center",
         legend_title="series",
     )
-    st.plotly_chart(center_fig, use_container_width=True)
+    st.plotly_chart(center_fig, width="stretch")
 
     rms_fig = go.Figure()
     rms_fig.add_trace(
@@ -689,7 +689,7 @@ def plot_trial_step_charts(steps: list[dict[str, Any]]) -> None:
         yaxis_title="spot_rms_radius",
         legend_title="series",
     )
-    st.plotly_chart(rms_fig, use_container_width=True)
+    st.plotly_chart(rms_fig, width="stretch")
 
 
 def render_spot_heatmap(
@@ -698,7 +698,7 @@ def render_spot_heatmap(
     spot_center_x: float | None = None,
     spot_center_y: float | None = None,
 ) -> None:
-    """ray_hits の 2D 密度ヒートマップを描画し、spot_center を星マーカーで重ねる。"""
+    """ray_hits の 2D 密度ヒートマップを描画し、spot_center を十字マーカーで重ねる。"""
     if not ray_hits:
         st.info(f"{title}: ray_hits データなし")
         return
@@ -742,10 +742,10 @@ def render_spot_heatmap(
                 y=[spot_center_y],
                 mode="markers",
                 marker=dict(
-                    symbol="star",
-                    size=16,
+                    symbol="cross-thin",
+                    size=14,
                     color="cyan",
-                    line=dict(width=1.5, color="black"),
+                    line=dict(width=1.0, color="black"),
                 ),
                 name="spot_center",
             )
@@ -771,7 +771,7 @@ def render_spot_heatmap(
         height=420,
         margin=dict(l=50, r=50, t=40, b=50),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def render_camera_image(
@@ -791,7 +791,7 @@ def render_camera_image(
     pixel_w, pixel_h : センサーの解像度（ピクセル数）
     pixel_pitch_um : 1ピクセルの物理サイズ (um)
     gaussian_sigma_px : PSFガウシアンぼかしの σ (ピクセル単位、0=ぼかしなし)
-    spot_center_x/y : 星マーカーで重ねるスポット中心 (mm)
+    spot_center_x/y : 十字マーカーで重ねるスポット中心 (mm)
     """
     if not ray_hits:
         st.info(f"{title}: ray_hits データなし")
@@ -854,10 +854,10 @@ def render_camera_image(
                 y=[spot_center_y],
                 mode="markers",
                 marker=dict(
-                    symbol="star",
-                    size=14,
+                    symbol="cross-thin",
+                    size=12,
                     color="red",
-                    line=dict(width=1.5, color="white"),
+                    line=dict(width=1.0, color="white"),
                 ),
                 name="spot_center",
                 hovertemplate="spot_center<br>X: %{x:.4f} mm<br>Y: %{y:.4f} mm<extra></extra>",
@@ -873,7 +873,7 @@ def render_camera_image(
         height=450,
         margin=dict(l=50, r=50, t=40, b=50),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # センサー外の光線数を報告
     in_sensor = np.sum((xs >= x_min) & (xs <= x_max) & (ys >= y_min) & (ys <= y_max))
@@ -892,11 +892,12 @@ def render_bolt_response_graph(
 ) -> go.Figure:
     """Render bolt response graph showing displacement vs initial position.
     
-    Shows deterministic displacement (Δx = a_x×x0^b_x, Δy = a_y×y0^b_y) as lines
-    and noise ranges (±σ(|x0|)) as shaded bands.
+    Shows deterministic displacement using initial-position bias model:
+    x_eff = x0 + x0_bias_x, Δx = sign(x_eff)×a_x×|x_eff|^b_x
+    and relative noise ranges (deterministic ±[min,max]%) as shaded bands.
     
     Args:
-        bolt_params: Dictionary containing a_x, b_x, a_y, b_y, noise_base_x/y, noise_prop_x/y
+        bolt_params: Dictionary containing x0_bias_x/y, a_x, b_x, a_y, b_y, noise_ratio_min/max_x/y
         position_max: Maximum position for x-axis (mm)
         title: Graph title
     
@@ -904,26 +905,34 @@ def render_bolt_response_graph(
         Plotly Figure object
     """
     # Extract parameters
+    x0_bias_x = bolt_params.get("x0_bias_x", 0.0)
+    x0_bias_y = bolt_params.get("x0_bias_y", 0.0)
     a_x = bolt_params.get("a_x", 0.0)
     b_x = bolt_params.get("b_x", 1.0)
     a_y = bolt_params.get("a_y", 0.0)
     b_y = bolt_params.get("b_y", 1.0)
-    noise_base_x = bolt_params.get("noise_base_x", 0.0)
-    noise_prop_x = bolt_params.get("noise_prop_x", 0.0)
-    noise_base_y = bolt_params.get("noise_base_y", 0.0)
-    noise_prop_y = bolt_params.get("noise_prop_y", 0.0)
+    noise_ratio_min_x = bolt_params.get("noise_ratio_min_x", 0.01)
+    noise_ratio_max_x = bolt_params.get("noise_ratio_max_x", 0.05)
+    noise_ratio_min_y = bolt_params.get("noise_ratio_min_y", 0.01)
+    noise_ratio_max_y = bolt_params.get("noise_ratio_max_y", 0.05)
     
     # Generate position values (symmetric around zero)
     pos = np.linspace(-position_max, position_max, 200)
     
-    # Calculate deterministic displacements
+    # Calculate deterministic displacements using effective positions.
     # Handle power function for negative values
-    delta_x = np.sign(pos) * a_x * (np.abs(pos) ** b_x)
-    delta_y = np.sign(pos) * a_y * (np.abs(pos) ** b_y)
+    pos_eff_x = pos + x0_bias_x
+    pos_eff_y = pos + x0_bias_y
+    delta_x = np.sign(pos_eff_x) * a_x * (np.abs(pos_eff_x) ** b_x)
+    delta_y = np.sign(pos_eff_y) * a_y * (np.abs(pos_eff_y) ** b_y)
     
-    # Calculate position-dependent noise std (using absolute value for symmetry)
-    sigma_x = np.maximum(0, noise_base_x + noise_prop_x * np.abs(pos))
-    sigma_y = np.maximum(0, noise_base_y + noise_prop_y * np.abs(pos))
+    # Calculate relative-noise envelopes around deterministic displacement.
+    ratio_max_x = max(0.0, float(noise_ratio_max_x))
+    ratio_max_y = max(0.0, float(noise_ratio_max_y))
+    band_upper_x = delta_x * (1.0 + ratio_max_x)
+    band_lower_x = delta_x * (1.0 - ratio_max_x)
+    band_upper_y = delta_y * (1.0 + ratio_max_y)
+    band_lower_y = delta_y * (1.0 - ratio_max_y)
     
     # Create figure
     fig = go.Figure()
@@ -937,14 +946,14 @@ def render_bolt_response_graph(
         hovertemplate="x0=%{x:.3f} mm<br>Δx=%{y:.5f} mm<extra></extra>",
     ))
     
-    # Δx noise band (±σ_x)
+    # Δx noise band (±max ratio)
     fig.add_trace(go.Scatter(
         x=np.concatenate([pos, pos[::-1]]),
-        y=np.concatenate([delta_x + sigma_x, (delta_x - sigma_x)[::-1]]),
+        y=np.concatenate([band_upper_x, band_lower_x[::-1]]),
         fill="toself",
         fillcolor="rgba(0,0,255,0.2)",
         line=dict(width=0),
-        showlegend=False,
+        name=f"Δx ±{ratio_max_x*100:.1f}%",
         hoverinfo="skip",
     ))
     
@@ -957,14 +966,14 @@ def render_bolt_response_graph(
         hovertemplate="x0=%{x:.3f} mm<br>Δy=%{y:.5f} mm<extra></extra>",
     ))
     
-    # Δy noise band (±σ_y)
+    # Δy noise band (±max ratio)
     fig.add_trace(go.Scatter(
         x=np.concatenate([pos, pos[::-1]]),
-        y=np.concatenate([delta_y + sigma_y, (delta_y - sigma_y)[::-1]]),
+        y=np.concatenate([band_upper_y, band_lower_y[::-1]]),
         fill="toself",
         fillcolor="rgba(255,0,0,0.2)",
         line=dict(width=0),
-        showlegend=False,
+        name=f"Δy ±{ratio_max_y*100:.1f}%",
         hoverinfo="skip",
     ))
     

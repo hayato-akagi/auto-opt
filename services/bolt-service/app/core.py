@@ -5,19 +5,18 @@ import numpy as np
 from .models import BoltAxisDelta, BoltDetail, BoltModel, BoltResult, BoltUnitModel
 
 
-def _sample_noise(rng: np.random.Generator, std_dev: float) -> float:
-    """Sample noise from normal distribution.
-    
-    Args:
-        rng: Random number generator
-        std_dev: Standard deviation (sigma)
-    
-    Returns:
-        Sampled noise value
+def _sample_signed_ratio(rng: np.random.Generator, min_ratio: float, max_ratio: float) -> float:
+    """Sample a signed relative ratio in [min_ratio, max_ratio] with random sign.
+
+    Returns 0 when max_ratio <= 0.
     """
-    if std_dev == 0.0:
+    max_r = max(0.0, float(max_ratio))
+    min_r = max(0.0, min(float(min_ratio), max_r))
+    if max_r == 0.0:
         return 0.0
-    return float(rng.normal(0.0, std_dev))
+    abs_ratio = float(rng.uniform(min_r, max_r))
+    sign = -1.0 if rng.random() < 0.5 else 1.0
+    return sign * abs_ratio
 
 
 def _compute_single_bolt_delta(
@@ -29,12 +28,12 @@ def _compute_single_bolt_delta(
     """Compute displacement for a single bolt with position-dependent power-law model.
     
     Model:
-        Δx = a_x × x0^b_x + N(0, σ_x(|x0|)²)
-        Δy = a_y × y0^b_y + N(0, σ_y(|y0|)²)
-    
-    Position-dependent noise:
-        σ_x(|x0|) = noise_base_x + noise_prop_x × |x0|
-        σ_y(|y0|) = noise_base_y + noise_prop_y × |y0|
+        x_eff = x0 + x0_bias_x
+        y_eff = y0 + x0_bias_y
+        Δ_det_x = sign(x_eff) × a_x × |x_eff|^b_x
+        Δ_det_y = sign(y_eff) × a_y × |y_eff|^b_y
+        Δx = Δ_det_x × (1 + r_x), r_x in ±[noise_ratio_min_x, noise_ratio_max_x]
+        Δy = Δ_det_y × (1 + r_y), r_y in ±[noise_ratio_min_y, noise_ratio_max_y]
     
     Args:
         x0: Initial X position before bolt fastening (mm)
@@ -45,25 +44,28 @@ def _compute_single_bolt_delta(
     Returns:
         BoltAxisDelta with computed displacements
     """
-    # Deterministic component (power-law model)
+    # Effective positions with bias (modeling preload / reference shift).
+    x_eff = x0 + bolt_unit.x0_bias_x
+    y_eff = y0 + bolt_unit.x0_bias_y
+
+    # Deterministic component from power-law at effective position
     # Handle negative values: preserve sign and use absolute value for power
-    if x0 == 0:
+    if x_eff == 0:
         delta_x_det = 0.0
     else:
-        delta_x_det = np.sign(x0) * bolt_unit.a_x * (abs(x0) ** bolt_unit.b_x)
+        delta_x_det = np.sign(x_eff) * bolt_unit.a_x * (abs(x_eff) ** bolt_unit.b_x)
     
-    if y0 == 0:
+    if y_eff == 0:
         delta_y_det = 0.0
     else:
-        delta_y_det = np.sign(y0) * bolt_unit.a_y * (abs(y0) ** bolt_unit.b_y)
+        delta_y_det = np.sign(y_eff) * bolt_unit.a_y * (abs(y_eff) ** bolt_unit.b_y)
     
-    # Position-dependent noise standard deviation (using absolute value for symmetry)
-    sigma_x = max(0.0, bolt_unit.noise_base_x + bolt_unit.noise_prop_x * abs(x0))
-    sigma_y = max(0.0, bolt_unit.noise_base_y + bolt_unit.noise_prop_y * abs(y0))
-    
-    # Add noise
-    delta_x = delta_x_det + _sample_noise(rng, sigma_x)
-    delta_y = delta_y_det + _sample_noise(rng, sigma_y)
+    # Multiplicative relative noise around deterministic displacement.
+    ratio_x = _sample_signed_ratio(rng, bolt_unit.noise_ratio_min_x, bolt_unit.noise_ratio_max_x)
+    ratio_y = _sample_signed_ratio(rng, bolt_unit.noise_ratio_min_y, bolt_unit.noise_ratio_max_y)
+
+    delta_x = delta_x_det * (1.0 + ratio_x)
+    delta_y = delta_y_det * (1.0 + ratio_y)
     
     return BoltAxisDelta(delta_x=delta_x, delta_y=delta_y)
 

@@ -10,4 +10,4 @@ COPY app/ ./app/
 ENV PYTHONPATH=/app
 EXPOSE 8501
 
-CMD ["streamlit", "run", "app/main.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+CMD ["streamlit", "run", "app/main.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true", "--server.fileWatcherType=none"]

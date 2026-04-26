@@ -205,7 +205,7 @@ def render(api_client: RecipeApiClient) -> None:
 
     results = last_result.get("results", [])
     if isinstance(results, list) and results:
-        st.dataframe(_build_result_rows(results), use_container_width=True, hide_index=True)
+        st.dataframe(_build_result_rows(results), width="stretch", hide_index=True)
         plot_sweep_charts(results, str(last_result.get("sweep_param", param_name)))
     else:
         st.info("表示可能なスイープ結果がありません")

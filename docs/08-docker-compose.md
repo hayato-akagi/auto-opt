@@ -71,8 +71,8 @@ services:
     volumes:
       - results-data:/app/data:ro
 
-  # controller:                    # 将来追加
-  #   build: ./services/controller
+  # simple-controller:             # 将来追加
+  #   build: ./services/simple-controller
   #   ports:
   #     - "8003:8003"
   #   environment:
@@ -136,7 +136,7 @@ auto-opt/
 | recipe-service | optics-sim | http://optics-sim:8001 |
 | recipe-service | position-service | http://position-service:8004 |
 | recipe-service | bolt-service | http://bolt-service:8005 |
-| controller (将来) | recipe-service | http://recipe-service:8002 |
+| simple-controller (将来) | recipe-service | http://recipe-service:8002 |
 
 ## 起動・停止
 
@@ -164,7 +164,7 @@ docker-compose down -v
 |------|---------|------|
 | 8001 | optics-sim | 光線追跡 API |
 | 8002 | recipe-service | 管理 API |
-| 8003 | controller (将来) | 制御器 API |
+| 8003 | simple-controller (将来) | 制御器 API |
 | 8004 | position-service | 位置調整 API |
 | 8005 | bolt-service | ボルト締結 API |
 | 8501 | streamlit-app | Web UI |

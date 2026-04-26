@@ -127,7 +127,7 @@ def render(api_client: RecipeApiClient) -> None:
 
     st.subheader("ステップ一覧")
     if steps:
-        st.dataframe(_build_step_rows(steps), use_container_width=True, hide_index=True)
+        st.dataframe(_build_step_rows(steps), width="stretch", hide_index=True)
     else:
         st.info("ステップが存在しません")
         return
@@ -236,6 +236,6 @@ def render(api_client: RecipeApiClient) -> None:
             if images is not None:
                 ray_path = _decode_image(images.get("ray_path_image"))
                 if ray_path:
-                    st.image(ray_path, caption=f"光路図 ({phase})", use_container_width=True)
+                    st.image(ray_path, caption=f"光路図 ({phase})", width="stretch")
                 else:
                     st.info("光路図を取得できませんでした")
