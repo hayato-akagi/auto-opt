@@ -106,7 +106,8 @@ class RecipeOrchestrator:
             },
             after_bolt=after_bolt,
             sim_after_bolt=self._strip_images(sim_after_bolt),
-        ).model_dump()
+            ai_step_log=command.ai_step_log,
+        ).model_dump(exclude_none=True)
 
         saved_to = await self.storage.save_step(experiment_id, trial_id, step_record)
 
@@ -168,13 +169,21 @@ class RecipeOrchestrator:
 
         shift_key = "after_position" if phase == "after_position" else "after_bolt"
         shift = step[shift_key]
+        
+        # Extract the coordinates based on phase
+        if phase == "after_position":
+            coll_x = shift["actual_x"]
+            coll_y = shift["actual_y"]
+        else:
+            coll_x = shift["final_x"]
+            coll_y = shift["final_y"]
 
         sim = await self.clients.simulate(
             engine_type,
             self._build_simulation_payload(
                 experiment=experiment,
-                coll_x_shift=shift["coll_x_shift"],
-                coll_y_shift=shift["coll_y_shift"],
+                coll_x_shift=coll_x,
+                coll_y_shift=coll_y,
                 return_ray_hits=False,
                 return_images=True,
             )

@@ -2,32 +2,41 @@
 
 ## システム構成図
 
-```
-┌──────────────┐
-│  Streamlit   │  :8501  可視化・操作UI
-└──────┬───────┘
-       │ 指示・データ参照
-       ▼
-┌──────────────┐
-│   Recipe     │  :8002  管理・オーケストレーション・保存
-│   Service    │
-└──┬──┬────┬───┘
-   │  │    │
-   │  │    ▼
-   │  │ ┌──────────┐
-   │  │ │ Position │  :8004  レンズ位置調整
-   │  │ └──────────┘
-   │  ▼
-   │ ┌──────────┐
-   │ │  Bolt    │  :8005  ボルト締結→ずれ計算
-   │ └──────────┘
-   ▼
-┌──────────────┐
-│  Optics Sim  │  :8001  光線追跡 (KrakenOS)
-└──────────────┘
+### 制御系
+
+```mermaid
+flowchart TD
+    UI["Streamlit :9501\n可視化・操作UI"]
+    CTL["制御器サービス群\nsimple-controller :9003\nai-controller :9006"]
+    RCP["Recipe Service :9002\n管理・オーケストレーション・保存"]
+    POS["Position Service :9004\nレンズXY位置調整"]
+    BOLT["Bolt Service :9005\nボルト締結→ずれ計算"]
+    SIM["Optics Sim :9001\n光線追跡 KrakenOS or Simple"]
+
+    UI -->|指示・データ参照| CTL
+    CTL -->|trial実行委譲| RCP
+    RCP --> POS
+    RCP --> BOLT
+    RCP --> SIM
 ```
 
-初回の制御器サービスは simple-controller (:8003)。将来は他の制御器サービスも同様に Streamlit と Recipe Service の間に入る。
+### 学習・モデル管理系
+
+```mermaid
+flowchart TD
+    CORD["collection-orchestrator :9007\nデータ収集ジョブ管理（並列対応）"]
+    CTL["制御器サービス群\nsimple-controller / ai-controller"]
+    RCP["recipe-service\n既存"]
+    TRN["trainer :9008\n学習・評価"]
+    MS["model-store :9009\nモデル管理"]
+    AIC["ai-controller :9006"]
+
+    CORD -->|control/run 並列呼び出し| CTL
+    CTL --> RCP
+    TRN -->|ステップデータ収集| RCP
+    TRN -->|モデル登録| MS
+    MS -->|current 取得| AIC
+```
 
 ## 座標系定義
 
@@ -55,13 +64,17 @@
 
 | # | サービス | Port | 技術スタック | 責務 |
 |---|---------|------|------------|------|
-| 1a | optics-sim (KrakenOS) | 8001 | Python, KrakenOS, FastAPI | 精密光線追跡計算 |
-| 1b | optics-sim (Simple) | 8011 | Python, NumPy, FastAPI | 高速ガウシアンモデル計算 |
-| 2 | recipe-service | 8002 | Python, FastAPI | オーケストレーション・データ保存 |
-| 3 | position-service | 8004 | Python, FastAPI | レンズXY位置設定 |
-| 4 | bolt-service | 8005 | Python, FastAPI | 初期位置→位置ずれ変換 |
-| 5 | streamlit-app | 8501 | Python, Streamlit | UI・可視化 |
-| 6 | simple-controller (将来) | 8003 | Python, FastAPI | simple-controller 制御・自動反復 |
+| 1a | optics-sim (KrakenOS) | 9001 | Python, KrakenOS, FastAPI | 精密光線追跡計算 |
+| 1b | optics-sim (Simple) | 9011 | Python, NumPy, FastAPI | 高速ガウシアンモデル計算 |
+| 2 | recipe-service | 9002 | Python, FastAPI | オーケストレーション・データ保存 |
+| 3 | simple-controller | 9003 | Python, FastAPI | 比例制御ベースライン |
+| 4 | position-service | 9004 | Python, FastAPI | レンズXY位置設定 |
+| 5 | bolt-service | 9005 | Python, FastAPI | 初期位置→位置ずれ変換 |
+| 6 | ai-controller | 9006 | Python, PyTorch, FastAPI | AI制御（MLP残差補正） |
+| 7 | collection-orchestrator | 9007 | Python, FastAPI | 並列データ収集ジョブ管理 |
+| 8 | trainer | 9008 | Python, PyTorch, FastAPI | モデル学習・評価・昇格 |
+| 9 | model-store | 9009 | Python, FastAPI | モデルバージョン管理 |
+| 10 | streamlit-app | 9501 | Python, Streamlit | UI・可視化 |
 
 **注**: optics-simは2つのエンジンが選択可能：
 - **KrakenOS版**（1a）: 厳密な光線追跡、全パラメータ使用
@@ -82,31 +95,47 @@
 
 ### 手動実行（1ステップ）
 
-```
-Streamlit → Recipe: "XY=(0.02, -0.05) で実行"
-  Recipe → Position: XY位置指定 → actual_x/y 返却（初期位置 x0, y0）
-  Recipe → Optics Sim: 位置調整後パラメータで追跡 → 結果A保存
-  Recipe → Bolt: 初期位置(x0, y0)指定 → Δx, Δy 返却
-  Recipe → Optics Sim: ボルト締結後パラメータで追跡 → 結果B保存
-  Recipe → Streamlit: 結果A, 結果B を返却
+```mermaid
+sequenceDiagram
+    participant UI as Streamlit
+    participant R as Recipe Service
+    participant P as Position Service
+    participant S as Optics Sim
+    participant B as Bolt Service
+
+    UI->>R: XY=(0.02, -0.05) で実行
+    R->>P: XY位置指定
+    P-->>R: actual_x/y（初期位置 x0, y0）
+    R->>S: 位置調整後パラメータで光線追跡
+    S-->>R: 結果A（sim_after_position）
+    R->>B: 初期位置(x0, y0)指定
+    B-->>R: Δx, Δy（bolt_shift）
+    R->>S: ボルト締結後パラメータで光線追跡
+    S-->>R: 結果B（sim_after_bolt）
+    R-->>UI: 結果A, 結果B
 ```
 
-### 制御ループ（将来）
+### 制御ループ
 
-```
-Streamlit → simple-controller: POST /control/run
-  (実験ID, algorithm, config, 目標スポット位置)
-  simple-controller → Recipe: POST /experiments/{id}/trials (mode=control_loop)
-  simple-controller → Recipe: Step 0 実行（初期観測）
-  ループ開始:
-    simple-controller: 相対操作量 delta_coll_x, delta_coll_y を決定
-    simple-controller → Recipe: POST /experiments/{id}/trials/{id}/steps
-      Recipe → Position → Sim → Bolt → Sim (通常のステップ実行)
-    simple-controller: sim_after_bolt で収束判定
-    simple-controller: 未収束なら緩め時揺らぎを反映
-    収束 or max_iterations で終了
-  simple-controller → Recipe: POST /experiments/{id}/trials/{id}/complete
-  simple-controller → Streamlit: 全試行履歴
+```mermaid
+sequenceDiagram
+    participant UI as Streamlit
+    participant C as 制御器サービス
+    participant R as Recipe Service
+
+    UI->>C: POST /control/run（実験ID, config, 目標スポット）
+    C->>R: POST /trials（mode=control_loop）
+    C->>R: Step 0 実行（初期観測）
+    R-->>C: 初期スポット位置
+    loop 収束 or max_steps に達するまで
+        C->>C: delta_coll_x/y を決定
+        C->>R: POST /trials/{id}/steps
+        Note over R: Position → Sim → Bolt → Sim
+        R-->>C: sim_after_bolt（スポット位置）
+        C->>C: 収束判定・緩め揺らぎ反映
+    end
+    C->>R: POST /trials/{id}/complete
+    C-->>UI: 全試行履歴
 ```
 
 制御器共通仕様は [05-controller.md](./05-controller.md) を参照。

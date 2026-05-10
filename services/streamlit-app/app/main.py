@@ -6,16 +6,20 @@ from collections.abc import Callable
 import streamlit as st
 
 from app.api_client import RecipeApiClient
-from app.pages import control, experiment, manual, results, sweep
+from app.pages import control, experiment, manual, results, sweep, ai_control, collection, training, model_store
 
 PageRenderer = Callable[[RecipeApiClient], None]
 
 PAGES: dict[str, PageRenderer] = {
-    "実験管理": experiment.render,
-    "手動操作": manual.render,
-    "スイープ": sweep.render,
-    "結果閲覧": results.render,
-    "制御ループ": control.render,
+    "✅ 実験管理": experiment.render,
+    "✅ 手動操作": manual.render,
+    "✅ スイープ": sweep.render,
+    "✅ 結果閲覧": results.render,
+    "✅ 制御ループ": control.render,
+    "🚧 AI制御": ai_control.render,
+    "🚧 データ収集": collection.render,
+    "🚧 トレーニング": training.render,
+    "🚧 モデルストア": model_store.render,
 }
 
 
@@ -38,9 +42,15 @@ def main() -> None:
     api_client = get_api_client()
 
     st.sidebar.title("auto-opt")
-    st.sidebar.caption("Recipe Service only")
-    st.sidebar.caption(f"RECIPE_SERVICE_URL: {api_client.base_url}")
-    st.sidebar.caption(f"SIMPLE_CONTROLLER_URL: {api_client.simple_controller_url}")
+    st.sidebar.markdown("---")
+    st.sidebar.caption("🔌 **接続サービス**")
+    st.sidebar.caption(f"📋 Recipe: {api_client.base_url}")
+    st.sidebar.caption(f"⚡ Controller: {api_client.simple_controller_url}")
+    st.sidebar.caption(f"🧠 Trainer: {api_client.trainer_url}")
+    st.sidebar.caption(f"🏪 Model Store: {api_client.model_store_url}")
+    st.sidebar.caption(f"🤖 AI Controller: {api_client.ai_controller_url}")
+    st.sidebar.caption(f"📊 Collection: {api_client.collection_orchestrator_url}")
+    st.sidebar.markdown("---")
 
     page_name = st.sidebar.radio("ページ", options=list(PAGES.keys()))
     PAGES[page_name](api_client)

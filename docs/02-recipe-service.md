@@ -124,7 +124,8 @@
   "options": {
     "return_ray_hits": false,   // オプション, デフォルト false
     "return_images": false      // オプション, デフォルト false
-  }
+  },
+  "ai_step_log": null          // オプション: ai-controller から渡される DNN ログ（simple-controller では null）
 }
 ```
 
@@ -186,6 +187,16 @@
     "ray_hits": null,
     "computation_time_ms": 118
   },
+
+  "ai_step_log": null          // DNN ログ: 通常の simple-controller では null、ai-controller では以下の構造
+                                   // {
+                                   //   "baseline_delta_x": 0.001,
+                                   //   "baseline_delta_y": 0.002,
+                                   //   "dnn_residual_x": 0.0001,
+                                   //   "dnn_residual_y": -0.0002,
+                                   //   "safety_triggered": false,
+                                   //   "model_version": "v1.0.0"
+                                   // }
 
   "saved_to": "experiments/exp_001/trial_001/step_000.json"
 }
@@ -412,3 +423,32 @@ def _build_simulation_payload(experiment, coll_x_shift, coll_y_shift, ...):
 4. final_x = actual_x + delta_x, final_y = actual_y + delta_y で Optics Sim 再呼び出し → 結果B
 5. step_NNN.json として結果A, 結果B を保存
 ```
+
+## AI ステップログ (`ai_step_log`)
+
+### 用途
+
+ai-controller が DNN による補正制御を行う際、各ステップごとの内部状態（baseline 偏差、DNN 残差、安全打ち切りフラグなど）を記録する。
+Simple-controller を使用する場合、`ai_step_log` は `null` のままである。
+
+### スキーマ
+
+```jsonc
+{
+  "baseline_delta_x": 0.001,      // mm, Baseline Controller（simple-controller）の予測値（X方向）
+  "baseline_delta_y": 0.002,      // mm, Baseline Controller の予測値（Y方向）
+  "dnn_residual_x": 0.0001,       // mm, DNN の残差予測（X方向）。最終補正は baseline + dnn_residual
+  "dnn_residual_y": -0.0002,      // mm, DNN の残差予測（Y方向）
+  "safety_triggered": false,      // bool, 安全打ち切り（出力制限など）が発動したかどうか
+  "model_version": "v1.0.0"       // str, 使用したモデルのバージョン（model-store の version）
+}
+```
+
+### 記録タイミング
+
+- **AI制御ステップ**: ai-controller が制御コマンドを生成する際、`ai_step_log` フィールドを `POST /steps` リクエストに含める
+- **通常ステップ**: ai_step_log を含めずにリクエスト（`ai_step_log: null` として保存）
+
+### 学習への影響
+
+Trainer は `ai_step_log` を読み取り、DNN の予測精度や安全機構の発動率などを分析に組み込む。

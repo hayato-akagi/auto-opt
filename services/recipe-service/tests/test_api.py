@@ -26,18 +26,18 @@ class FakeDownstreamClients:
     async def apply_position(self, coll_x: float, coll_y: float) -> dict[str, Any]:
         payload = {"coll_x": coll_x, "coll_y": coll_y}
         self.calls.append(("position", payload))
-        return {"coll_x_shift": coll_x, "coll_y_shift": coll_y}
+        return {"actual_x": coll_x, "actual_y": coll_y}
 
     async def apply_bolt(
         self,
-        torque_upper: float,
-        torque_lower: float,
+        x0: float,
+        y0: float,
         bolt_model: dict[str, Any],
         random_seed: int | None,
     ) -> dict[str, Any]:
         payload = {
-            "torque_upper": torque_upper,
-            "torque_lower": torque_lower,
+            "x0": x0,
+            "y0": y0,
             "bolt_model": bolt_model,
             "random_seed": random_seed,
         }
@@ -66,7 +66,7 @@ class FakeDownstreamClients:
             },
         }
 
-    async def simulate(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def simulate(self, engine_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("simulate", dict(payload)))
 
         if self.fail_next_optics:
@@ -147,16 +147,28 @@ def build_experiment_payload(name: str = "baseline_780nm") -> dict[str, Any]:
         },
         "bolt_model": {
             "upper": {
-                "shift_x_per_nm": 0.001,
-                "shift_y_per_nm": 0.003,
-                "noise_std_x": 0.002,
-                "noise_std_y": 0.005,
+                "x0_bias_x": 0.05,
+                "x0_bias_y": 0.0,
+                "a_x": 0.02,
+                "b_x": 1.0,
+                "a_y": 0.02,
+                "b_y": 1.0,
+                "noise_ratio_min_x": 0.01,
+                "noise_ratio_max_x": 0.05,
+                "noise_ratio_min_y": 0.01,
+                "noise_ratio_max_y": 0.05,
             },
             "lower": {
-                "shift_x_per_nm": -0.0005,
-                "shift_y_per_nm": 0.002,
-                "noise_std_x": 0.001,
-                "noise_std_y": 0.003,
+                "x0_bias_x": 0.0,
+                "x0_bias_y": 0.0,
+                "a_x": 0.01,
+                "b_x": 1.0,
+                "a_y": 0.01,
+                "b_y": 1.0,
+                "noise_ratio_min_x": 0.01,
+                "noise_ratio_max_x": 0.05,
+                "noise_ratio_min_y": 0.01,
+                "noise_ratio_max_y": 0.05,
             },
         },
     }
@@ -166,8 +178,6 @@ def build_step_payload() -> dict[str, Any]:
     return {
         "coll_x": 0.02,
         "coll_y": -0.05,
-        "torque_upper": 0.5,
-        "torque_lower": 0.5,
         "options": {
             "return_ray_hits": False,
             "return_images": False,
@@ -343,8 +353,8 @@ async def test_step_images_endpoint_uses_phase_shift(client_bundle) -> None:
     assert call_name == "simulate"
 
     expected_after_bolt = step_response.json()["after_bolt"]
-    assert sim_payload["coll_x_shift"] == expected_after_bolt["coll_x_shift"]
-    assert sim_payload["coll_y_shift"] == expected_after_bolt["coll_y_shift"]
+    assert sim_payload["coll_x_shift"] == expected_after_bolt["final_x"]
+    assert sim_payload["coll_y_shift"] == expected_after_bolt["final_y"]
     assert sim_payload["return_ray_path_image"] is True
     assert sim_payload["return_spot_diagram_image"] is True
 
@@ -361,8 +371,6 @@ async def test_sweep_creates_multiple_steps_and_summary(client_bundle) -> None:
         "base_command": {
             "coll_x": 0.0,
             "coll_y": 0.0,
-            "torque_upper": 0.5,
-            "torque_lower": 0.5,
         },
         "sweep": {
             "param_name": "coll_y",
@@ -413,6 +421,55 @@ async def test_id_auto_increment_for_experiments_and_trials(client_bundle) -> No
     assert trial1.json()["trial_id"] == "trial_001"
     assert trial2.json()["trial_id"] == "trial_002"
     assert trial3.json()["trial_id"] == "trial_001"
+
+
+@pytest.mark.asyncio
+async def test_step_ai_step_log_is_none_by_default(client_bundle) -> None:
+    client, tmp_path, _ = client_bundle
+    experiment_id, trial_id = await create_experiment_and_trial(client)
+
+    response = await client.post(
+        f"/experiments/{experiment_id}/trials/{trial_id}/steps",
+        json=build_step_payload(),
+    )
+    assert response.status_code == 200
+
+    step_file = tmp_path / "experiments" / experiment_id / trial_id / "step_000.json"
+    data = json.loads(step_file.read_text())
+    assert data.get("ai_step_log") is None
+
+
+@pytest.mark.asyncio
+async def test_step_ai_step_log_stored_when_provided(client_bundle) -> None:
+    client, tmp_path, _ = client_bundle
+    experiment_id, trial_id = await create_experiment_and_trial(client)
+
+    payload = build_step_payload()
+    payload["ai_step_log"] = {
+        "baseline_delta_x": 0.01,
+        "baseline_delta_y": -0.02,
+        "dnn_residual_x": 0.001,
+        "dnn_residual_y": -0.002,
+        "safety_triggered": False,
+        "model_version": "v1.0.0",
+    }
+
+    response = await client.post(
+        f"/experiments/{experiment_id}/trials/{trial_id}/steps",
+        json=payload,
+    )
+    assert response.status_code == 200
+
+    step_file = tmp_path / "experiments" / experiment_id / trial_id / "step_000.json"
+    data = json.loads(step_file.read_text())
+    log = data.get("ai_step_log")
+    assert log is not None
+    assert log["baseline_delta_x"] == pytest.approx(0.01)
+    assert log["baseline_delta_y"] == pytest.approx(-0.02)
+    assert log["dnn_residual_x"] == pytest.approx(0.001)
+    assert log["dnn_residual_y"] == pytest.approx(-0.002)
+    assert log["safety_triggered"] is False
+    assert log["model_version"] == "v1.0.0"
 
 
 @pytest.mark.asyncio

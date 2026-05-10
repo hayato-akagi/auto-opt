@@ -16,13 +16,44 @@
 | `POST` | `/experiments/{id}/trials` | 試行を開始 |
 | `GET` | `/experiments/{id}/trials` | 試行一覧 |
 | `GET` | `/experiments/{id}/trials/{id}` | 試行詳細 |
-| `POST` | `/experiments/{id}/trials/{id}/steps` | 1ステップ実行 |
+| `POST` | `/experiments/{id}/trials/{id}/steps` | 1ステップ実行（Positionサービス → 光学シミュレーション → Boltサービス → 光学シミュレーション） |
 | `GET` | `/experiments/{id}/trials/{id}/steps` | 全ステップ一覧（サマリ） |
 | `GET` | `/experiments/{id}/trials/{id}/steps/{idx}` | ステップ詳細 |
 | `POST` | `/experiments/{id}/trials/{id}/steps/{idx}/images` | 画像再取得 |
-| `POST` | `/experiments/{id}/trials/{id}/complete` | 試行完了 |
-| `POST` | `/recipes/sweep` | パラメータスイープ |
-| `GET` | `/health` | ヘルスチェック |
+| `POST` | `/experiments/{id}/trials/{id}/complete` | 試行完了（サマリー生成） |
+### POST /experiments/{experiment_id}/trials/{trial_id}/steps
+
+1ステップを実行。Position → Optics-Sim → Bolt → Optics-Sim のフローを実行・保存・返却。
+
+#### Request
+
+```jsonc
+{
+  "coll_x": 0.02,
+  "coll_y": -0.05,
+  "options": {
+    "return_ray_hits": false,
+    "return_images": false
+  },
+  "ai_step_log": null            // オプション: ai-controller からの DNN ロジック結果
+}
+```
+
+#### Response (200)
+
+```jsonc
+{
+  "step_index": 0,
+  "after_position": { "actual_x": 0.02, "actual_y": -0.05 },
+  "sim_after_position": { "spot_center_x": 0.01, "..." },
+  "bolt_shift": { "delta_x": 0.003, "delta_y": 0.008, "used_seed": 123456 },
+  "after_bolt": { "final_x": 0.023, "final_y": -0.042 },
+  "sim_after_bolt": { "spot_center_x": 0.012, "..." },
+  "saved_to": "experiments/exp_001/trial_001/step_000.json"
+}
+```
+
+**ai_step_log**: ai-controller が DNN 推論時に記録する内部状態（baseline_delta_x/y, dnn_residual_x/y, safety_triggered, model_version）。simple-controller 使用時は null。
 
 ## ID採番
 
@@ -46,8 +77,30 @@
   },
   "bolt_model": {
     "upper": {
-      "shift_x_per_nm": 0.001, "shift_y_per_nm": 0.003,
-      "noise_std_x": 0.002, "noise_std_y": 0.005
+      "x0_bias_x": 0.0,
+      "x0_bias_y": 0.0,
+      "a_x": 0.05,
+      "b_x": 1.0,
+      "a_y": 0.08,
+      "b_y": 1.0,
+      "noise_ratio_min_x": 0.01,
+      "noise_ratio_max_x": 0.05,
+      "noise_ratio_min_y": 0.01,
+      "noise_ratio_max_y": 0.05
+    },
+    "lower": {
+      "x0_bias_x": 0.0,
+      "x0_bias_y": 0.0,
+      "a_x": -0.03,
+      "b_x": 1.0,
+      "a_y": 0.05,
+      "b_y": 1.0,
+      "noise_ratio_min_x": 0.01,
+      "noise_ratio_max_x": 0.05,
+      "noise_ratio_min_y": 0.01,
+      "noise_ratio_max_y": 0.05
+    }
+  },
     },
     "lower": {
       "shift_x_per_nm": -0.0005, "shift_y_per_nm": 0.002,

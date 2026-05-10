@@ -141,12 +141,24 @@ class StepOptions(BaseModel):
     return_images: bool = False
 
 
+class AiStepLog(BaseModel):
+    """Optional per-step log written by ai-controller. None for simple-controller trials."""
+
+    baseline_delta_x: float
+    baseline_delta_y: float
+    dnn_residual_x: float
+    dnn_residual_y: float
+    safety_triggered: bool
+    model_version: str | None = None
+
+
 class StepExecuteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     coll_x: float
     coll_y: float
     options: StepOptions = Field(default_factory=StepOptions)
+    ai_step_log: AiStepLog | None = None
 
 
 class StepExecuteResponse(BaseModel):
@@ -168,6 +180,7 @@ class StepRecord(BaseModel):
     bolt_shift: dict[str, Any]
     after_bolt: dict[str, float]
     sim_after_bolt: dict[str, Any]
+    ai_step_log: AiStepLog | None = None
 
 
 class StepSummary(BaseModel):

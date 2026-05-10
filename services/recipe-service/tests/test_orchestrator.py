@@ -36,16 +36,28 @@ def build_experiment_request() -> ExperimentCreateRequest:
         },
         bolt_model={
             "upper": {
-                "shift_x_per_nm": 0.001,
-                "shift_y_per_nm": 0.003,
-                "noise_std_x": 0.002,
-                "noise_std_y": 0.005,
+                "x0_bias_x": 0.0,
+                "x0_bias_y": 0.0,
+                "a_x": 0.001,
+                "b_x": 1.0,
+                "a_y": 0.003,
+                "b_y": 1.0,
+                "noise_ratio_min_x": 0.01,
+                "noise_ratio_max_x": 0.02,
+                "noise_ratio_min_y": 0.01,
+                "noise_ratio_max_y": 0.05,
             },
             "lower": {
-                "shift_x_per_nm": -0.0005,
-                "shift_y_per_nm": 0.002,
-                "noise_std_x": 0.001,
-                "noise_std_y": 0.003,
+                "x0_bias_x": 0.0,
+                "x0_bias_y": 0.0,
+                "a_x": -0.0005,
+                "b_x": 1.0,
+                "a_y": 0.002,
+                "b_y": 1.0,
+                "noise_ratio_min_x": 0.01,
+                "noise_ratio_max_x": 0.01,
+                "noise_ratio_min_y": 0.01,
+                "noise_ratio_max_y": 0.03,
             },
         },
     )
@@ -57,9 +69,27 @@ class OrderedClients:
 
     async def apply_position(self, coll_x: float, coll_y: float) -> dict[str, Any]:
         self.calls.append("position")
-        return {"coll_x_shift": coll_x, "coll_y_shift": coll_y}
+        return {"actual_x": coll_x, "actual_y": coll_y}
 
-    async def simulate(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def apply_bolt(
+        self,
+        x0: float,
+        y0: float,
+        bolt_model: dict[str, Any],
+        random_seed: int | None,
+    ) -> dict[str, Any]:
+        self.calls.append("bolt")
+        return {
+            "delta_x": 0.003,
+            "delta_y": 0.002,
+            "used_seed": random_seed or 0,
+            "detail": {
+                "upper": {"delta_x": 0.0015, "delta_y": 0.001},
+                "lower": {"delta_x": 0.0015, "delta_y": 0.001},
+            },
+        }
+
+    async def simulate(self, engine_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append("simulate")
         shift_x = float(payload["coll_x_shift"])
         shift_y = float(payload["coll_y_shift"])
@@ -79,30 +109,12 @@ class OrderedClients:
             "computation_time_ms": 10,
         }
 
-    async def apply_bolt(
-        self,
-        torque_upper: float,
-        torque_lower: float,
-        bolt_model: dict[str, Any],
-        random_seed: int | None,
-    ) -> dict[str, Any]:
-        self.calls.append("bolt")
-        return {
-            "delta_x": 0.001,
-            "delta_y": 0.002,
-            "used_seed": 100,
-            "detail": {
-                "upper": {"delta_x": 0.001, "delta_y": 0.001},
-                "lower": {"delta_x": 0.0, "delta_y": 0.001},
-            },
-        }
-
 
 class BoltFailClients(OrderedClients):
     async def apply_bolt(
         self,
-        torque_upper: float,
-        torque_lower: float,
+        x0: float,
+        y0: float,
         bolt_model: dict[str, Any],
         random_seed: int | None,
     ) -> dict[str, Any]:
@@ -132,8 +144,6 @@ async def test_orchestration_order_is_position_sim_bolt_sim(tmp_path) -> None:
         StepExecuteRequest(
             coll_x=0.02,
             coll_y=-0.05,
-            torque_upper=0.5,
-            torque_lower=0.5,
         ),
     )
 
@@ -161,8 +171,6 @@ async def test_bolt_failure_does_not_save_step(tmp_path) -> None:
             StepExecuteRequest(
                 coll_x=0.02,
                 coll_y=-0.05,
-                torque_upper=0.5,
-                torque_lower=0.5,
             ),
         )
 

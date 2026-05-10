@@ -138,7 +138,78 @@ auto-opt/
 | recipe-service | bolt-service | http://bolt-service:8005 |
 | simple-controller (将来) | recipe-service | http://recipe-service:8002 |
 
-## 起動・停止
+## 新しいサービス（AI学習パイプライン）
+
+`docker-compose.yml` では以下の新しいサービスが追加される予定です：
+
+### trainer (ポート 9008)
+
+```yaml
+trainer:
+  build: ./services/trainer
+  ports:
+    - "9008:8000"
+  environment:
+    - RECIPE_SERVICE_URL=http://recipe-service:8002
+    - MODEL_STORE_URL=http://model-store:9009
+  depends_on:
+    - recipe-service
+    - model-store
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+```
+
+### model-store (ポート 9009)
+
+```yaml
+model-store:
+  build: ./services/model-store
+  ports:
+    - "9009:8000"
+  volumes:
+    - models-data:/app/data
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+```
+
+### ai-controller (ポート 9006)
+
+CPU版（学習GPU編集フェーズ）または GPU版（推論フェーズ）を選択：
+
+```yaml
+ai-controller:
+  build:
+    context: ./services/ai-controller
+    dockerfile: Dockerfile.cpu  # または Dockerfile.gpu
+  ports:
+    - "9006:8000"
+  environment:
+    - MODEL_STORE_URL=http://model-store:9009
+  depends_on:
+    - model-store
+```
+
+### collection-orchestrator (ポート 9007)
+
+```yaml
+collection-orchestrator:
+  build: ./services/collection-orchestrator
+  ports:
+    - "9007:8000"
+  environment:
+    - RECIPE_SERVICE_URL=http://recipe-service:8002
+    - SIMPLE_CONTROLLER_URL=http://simple-controller:9003
+  depends_on:
+    - recipe-service
+```
+
+### ボリューム追加
+
+```yaml
+volumes:
+  results-data:
+  models-data:       # モデルストアの永続化
+```
 
 ```bash
 # 全サービス起動
@@ -163,8 +234,13 @@ docker-compose down -v
 | Port | サービス | 用途 |
 |------|---------|------|
 | 8001 | optics-sim | 光線追跡 API |
-| 8002 | recipe-service | 管理 API |
-| 8003 | simple-controller (将来) | 制御器 API |
+| 8002 | recipe-service | 実験・試行管理 API |
+| 8003 | simple-controller | シンプル制御器 API |
 | 8004 | position-service | 位置調整 API |
 | 8005 | bolt-service | ボルト締結 API |
+| 9003 | simple-controller（ポートB） | 制御ループ実行 API |
+| 9006 | ai-controller | AI制御器 API |
+| 9007 | collection-orchestrator | データ収集 API |
+| 9008 | trainer | モデル学習 API |
+| 9009 | model-store | モデル管理 API |
 | 8501 | streamlit-app | Web UI |
