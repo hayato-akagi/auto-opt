@@ -1,16 +1,23 @@
+"""
+Result Comparison Screen (Screen 4)
+
+Compare performance of different controllers (baseline vs AI) across multiple trials.
+Display metrics: convergence rate, median error, p95 error, average steps.
+"""
+
 from __future__ import annotations
 
-import base64
-import binascii
+import math
 from typing import Any
 
+import plotly.graph_objects as go
 import streamlit as st
 
 from app.api_client import RecipeApiClient
-from app.components.charts import plot_trial_step_charts, render_camera_image, render_spot_heatmap
 
 
 def _select_experiment(api_client: RecipeApiClient) -> str | None:
+    """Select experiment for comparison"""
     experiments = api_client.list_experiments()
     if experiments is None:
         return None
@@ -27,10 +34,10 @@ def _select_experiment(api_client: RecipeApiClient) -> str | None:
 
     id_to_experiment = {item["experiment_id"]: item for item in experiments}
     selected_id = st.selectbox(
-        "実験",
+        "対象実験",
         options=experiment_ids,
         index=index,
-        key="results_experiment_select",
+        key="comparison_experiment_select",
         format_func=lambda exp_id: (
             f"{exp_id} | {id_to_experiment[exp_id]['name']} "
             f"({id_to_experiment[exp_id].get('engine_type', 'KrakenOS')})"
@@ -40,63 +47,240 @@ def _select_experiment(api_client: RecipeApiClient) -> str | None:
     return selected_id
 
 
-def _build_step_rows(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for item in steps:
-        command = item.get("command", {})
-        sim_pos = item.get("sim_after_position", {})
-        sim_bolt = item.get("sim_after_bolt", {})
-        rows.append(
-            {
-                "step_index": item.get("step_index"),
-                "coll_x": command.get("coll_x"),
-                "coll_y": command.get("coll_y"),
-                "torque_upper": command.get("torque_upper"),
-                "torque_lower": command.get("torque_lower"),
-                "pos_center_x": sim_pos.get("spot_center_x"),
-                "pos_center_y": sim_pos.get("spot_center_y"),
-                "pos_rms": sim_pos.get("spot_rms_radius"),
-                "bolt_center_x": sim_bolt.get("spot_center_x"),
-                "bolt_center_y": sim_bolt.get("spot_center_y"),
-                "bolt_rms": sim_bolt.get("spot_rms_radius"),
-            }
-        )
-    return rows
-
-
-def _decode_image(encoded: str | None) -> bytes | None:
-    if not encoded:
+def _compute_trial_metrics(
+    api_client: RecipeApiClient,
+    experiment_id: str,
+    trial_id: str,
+) -> dict[str, Any] | None:
+    """Compute metrics for a single trial: convergence, final distance, step count"""
+    steps = api_client.list_steps(experiment_id, trial_id)
+    if steps is None or not steps:
         return None
 
-    payload = encoded
-    if payload.startswith("data:image") and "," in payload:
-        payload = payload.split(",", 1)[1]
+    # Compute final position error (distance from target)
+    final_step = steps[-1]
+    sim_after_bolt = final_step.get("sim_after_bolt", {})
+    final_x = sim_after_bolt.get("spot_center_x", 0.0)
+    final_y = sim_after_bolt.get("spot_center_y", 0.0)
+    final_distance = math.sqrt(final_x**2 + final_y**2)
 
-    try:
-        return base64.b64decode(payload)
-    except (binascii.Error, ValueError):
-        st.error("画像データのデコードに失敗しました")
+    return {
+        "trial_id": trial_id,
+        "step_count": len(steps),
+        "final_distance_mm": final_distance,
+    }
+
+
+def _compute_controller_stats(
+    api_client: RecipeApiClient,
+    experiment_id: str,
+    algorithm: str,
+) -> dict[str, Any] | None:
+    """Compute aggregated statistics for all trials with given algorithm"""
+    trials = api_client.list_trials(experiment_id)
+    if trials is None:
         return None
 
+    # Filter trials by control algorithm
+    matching_trials = [
+        t for t in trials
+        if t.get("control", {}).get("algorithm") == algorithm
+    ]
 
-def _format_trial(trial: dict[str, Any]) -> str:
-    status = "completed" if trial.get("completed") else "running"
-    return (
-        f"{trial.get('trial_id')} | mode={trial.get('mode')} | "
-        f"steps={trial.get('total_steps')} | {status}"
-    )
+    if not matching_trials:
+        return None
+
+    # Compute metrics for each trial
+    metrics_list = []
+    for trial in matching_trials:
+        trial_id = trial.get("trial_id")
+        if not trial_id:
+            continue
+        metrics = _compute_trial_metrics(api_client, experiment_id, trial_id)
+        if metrics:
+            metrics_list.append(metrics)
+
+    if not metrics_list:
+        return None
+
+    # Aggregate statistics
+    final_distances = [m["final_distance_mm"] for m in metrics_list]
+    step_counts = [m["step_count"] for m in metrics_list]
+
+    tolerance = 0.05  # mm, standard tolerance
+    converged = sum(1 for d in final_distances if d <= tolerance)
+    convergence_rate = converged / len(final_distances)
+
+    final_distances.sort()
+    n = len(final_distances)
+    median_error = final_distances[n // 2] if n > 0 else 0.0
+    p95_error = final_distances[int(n * 0.95)] if n > 1 else final_distances[0]
+    avg_steps = sum(step_counts) / len(step_counts) if step_counts else 0.0
+
+    return {
+        "algorithm": algorithm,
+        "trial_count": len(final_distances),
+        "convergence_rate": convergence_rate,
+        "median_error_mm": median_error,
+        "p95_error_mm": p95_error,
+        "avg_steps": avg_steps,
+        "min_error_mm": min(final_distances),
+        "max_error_mm": max(final_distances),
+        "all_distances": final_distances,
+        "all_steps": step_counts,
+    }
 
 
 def render(api_client: RecipeApiClient) -> None:
-    st.header("結果閲覧")
+    """Main render function for result comparison screen"""
+    st.header("4️⃣ 結果比較")
+    st.caption("複数のコントローラー性能を比較します")
 
     experiment_id = _select_experiment(api_client)
     if experiment_id is None:
+        st.info("最初に実験を作成してください")
         return
 
-    # 実験のカメラ設定を取得
-    experiment_detail = api_client.get_experiment(experiment_id)
-    camera_cfg = (experiment_detail or {}).get("camera") or {}
+    # Update global context
+    st.session_state["selected_experiment_id"] = experiment_id
+
+    st.divider()
+    st.subheader("コントローラー選択")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        compare_baseline = st.checkbox("ベースライン (simple-controller)", value=True, key="compare_baseline")
+    with col2:
+        compare_ai = st.checkbox("AI コントローラー (ai-controller)", value=True, key="compare_ai")
+
+    if not (compare_baseline or compare_ai):
+        st.warning("少なくとも1つのコントローラーを選択してください")
+        return
+
+    # Compute statistics
+    algorithms_to_compare = []
+    if compare_baseline:
+        algorithms_to_compare.append("simple-controller")
+    if compare_ai:
+        algorithms_to_compare.append("ai-controller")
+
+    st.divider()
+    st.markdown("#### 比較結果")
+
+    stats_dict: dict[str, dict[str, Any]] = {}
+    for algo in algorithms_to_compare:
+        stats = _compute_controller_stats(api_client, experiment_id, algo)
+        if stats:
+            stats_dict[algo] = stats
+        else:
+            st.warning(f"{algo}: 該当する試行がありません")
+
+    if not stats_dict:
+        st.info("比較対象のデータがまだありません。先にデータを収集してください")
+        return
+
+    # Display metrics table
+    st.markdown("**メトリクス一覧**")
+    rows = []
+    for algo, stats in stats_dict.items():
+        rows.append({
+            "コントローラー": algo,
+            "試行数": stats["trial_count"],
+            "収束率": f"{stats['convergence_rate']*100:.1f}%",
+            "中央値誤差 (mm)": f"{stats['median_error_mm']:.4f}",
+            "95%ile誤差 (mm)": f"{stats['p95_error_mm']:.4f}",
+            "平均ステップ数": f"{stats['avg_steps']:.1f}",
+            "最小誤差 (mm)": f"{stats['min_error_mm']:.4f}",
+            "最大誤差 (mm)": f"{stats['max_error_mm']:.4f}",
+        })
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    # Display bar charts for key metrics
+    st.divider()
+    st.markdown("**メトリクス比較グラフ**")
+
+    labels = list(stats_dict.keys())
+    convergence_rates = [stats_dict[algo]["convergence_rate"] * 100 for algo in labels]
+    median_errors = [stats_dict[algo]["median_error_mm"] for algo in labels]
+    p95_errors = [stats_dict[algo]["p95_error_mm"] for algo in labels]
+    avg_steps = [stats_dict[algo]["avg_steps"] for algo in labels]
+
+    # Metric 1: Convergence Rate
+    fig1 = go.Figure()
+    fig1.add_trace(go.Bar(x=labels, y=convergence_rates, marker_color="#2ca02c", text=[f"{v:.1f}%" for v in convergence_rates], textposition="outside"))
+    fig1.update_layout(
+        title="収束率",
+        yaxis_title="収束率 (%)",
+        height=300,
+        margin=dict(l=20, r=20, t=40, b=20),
+    )
+    st.plotly_chart(fig1, use_container_width=True)
+
+    # Metric 2: Errors (median + p95)
+    fig2 = go.Figure()
+    fig2.add_trace(go.Bar(x=labels, y=median_errors, name="中央値誤差 (mm)", marker_color="#1f77b4"))
+    fig2.add_trace(go.Bar(x=labels, y=p95_errors, name="95%ile誤差 (mm)", marker_color="#ff7f0e"))
+    fig2.update_layout(
+        title="最終位置誤差",
+        yaxis_title="誤差 (mm)",
+        barmode="group",
+        height=300,
+        margin=dict(l=20, r=20, t=40, b=20),
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # Metric 3: Average Steps
+    fig3 = go.Figure()
+    fig3.add_trace(go.Bar(x=labels, y=avg_steps, marker_color="#9467bd", text=[f"{v:.1f}" for v in avg_steps], textposition="outside"))
+    fig3.update_layout(
+        title="平均ステップ数",
+        yaxis_title="ステップ数",
+        height=300,
+        margin=dict(l=20, r=20, t=40, b=20),
+    )
+    st.plotly_chart(fig3, use_container_width=True)
+
+    # Distribution plots
+    st.divider()
+    st.markdown("**誤差分布**")
+
+    fig4 = go.Figure()
+    colors = ["#2ca02c", "#ff7f0e", "#d62728"]
+    for idx, (algo, stats) in enumerate(stats_dict.items()):
+        distances = stats["all_distances"]
+        fig4.add_trace(go.Histogram(
+            x=distances,
+            name=algo,
+            opacity=0.7,
+            marker_color=colors[idx % len(colors)],
+        ))
+    fig4.update_layout(
+        title="最終位置誤差分布",
+        xaxis_title="誤差 (mm)",
+        yaxis_title="試行数",
+        barmode="overlay",
+        height=350,
+        margin=dict(l=20, r=20, t=40, b=20),
+    )
+    st.plotly_chart(fig4, use_container_width=True)
+
+    # Trials detail
+    st.divider()
+    st.markdown("**試行詳細**")
+
+    for algo, stats in stats_dict.items():
+        with st.expander(f"{algo} - 全試行データ"):
+            trial_rows = []
+            for i, (distance, steps) in enumerate(zip(stats["all_distances"], stats["all_steps"]), 1):
+                tolerance = 0.05
+                converged = "✅" if distance <= tolerance else "❌"
+                trial_rows.append({
+                    "試行#": i,
+                    "収束": converged,
+                    "最終誤差 (mm)": f"{distance:.4f}",
+                    "ステップ数": steps,
+                })
+            st.dataframe(trial_rows, use_container_width=True, hide_index=True)
 
     trials = api_client.list_trials(experiment_id)
     if trials is None:
