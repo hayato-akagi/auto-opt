@@ -246,22 +246,27 @@ def _render_step2_data_collection(api_client: RecipeApiClient, experiment_id: st
             "max_workers": int(max_workers),
         }
 
-        created = api_client.start_collection_job(job_payload)
-        if created:
-            wizard_state.update({
-                "step2_complete": True,
-                "collection_job_id": created.get("job_id"),
-                "seeds_text": seeds_text,
-                "max_workers": int(max_workers),
-                "max_steps": int(max_steps),
-                "tolerance": float(tolerance),
-                "delta_clip": float(delta_clip),
-                "expand_enabled": expand_enabled,
-                "expand_ratio": expand_ratio,
-            })
-            st.session_state["model_creation_wizard"] = wizard_state
-            st.success(f"データ収集ジョブを開始しました: {created.get('job_id')}")
-            return wizard_state
+        try:
+            created = api_client.start_collection_job(job_payload)
+            if created:
+                wizard_state.update({
+                    "step2_complete": True,
+                    "collection_job_id": created.get("job_id"),
+                    "seeds_text": seeds_text,
+                    "max_workers": int(max_workers),
+                    "max_steps": int(max_steps),
+                    "tolerance": float(tolerance),
+                    "delta_clip": float(delta_clip),
+                    "expand_enabled": expand_enabled,
+                    "expand_ratio": expand_ratio,
+                })
+                st.session_state["model_creation_wizard"] = wizard_state
+                st.success(f"データ収集ジョブを開始しました: {created.get('job_id')}")
+                return wizard_state
+            else:
+                st.error("データ収集ジョブの開始に失敗しました。collection-orchestrator サービスを確認してください")
+        except Exception as e:
+            st.error(f"データ収集開始中にエラーが発生しました: {str(e)}")
 
     return None
 
@@ -341,24 +346,29 @@ def _render_step3_training(api_client: RecipeApiClient, experiment_id: str) -> N
         submit_training = st.form_submit_button("トレーニング開始", type="primary")
 
     if submit_training:
-        response = api_client.start_training(
-            {
-                "experiment_ids": [experiment_id],
-                "model_type": model_type,
-                "epochs": epochs,
-                "batch_size": batch_size,
-                "learning_rate": learning_rate,
-            }
-        )
-        if response:
-            wizard_state.update({
-                "step3_complete": True,
-                "training_result": response,
-            })
-            st.session_state["model_creation_wizard"] = wizard_state
-            st.success("トレーニングを開始しました")
-            st.session_state["current_model_version"] = model_name
-            st.rerun()
+        try:
+            response = api_client.start_training(
+                {
+                    "experiment_ids": [experiment_id],
+                    "model_type": model_type,
+                    "epochs": epochs,
+                    "batch_size": batch_size,
+                    "learning_rate": learning_rate,
+                }
+            )
+            if response:
+                wizard_state.update({
+                    "step3_complete": True,
+                    "training_result": response,
+                })
+                st.session_state["model_creation_wizard"] = wizard_state
+                st.success("トレーニングを開始しました")
+                st.session_state["current_model_version"] = model_name
+                st.rerun()
+            else:
+                st.error("トレーニング開始に失敗しました。Trainer サービスを確認してください")
+        except Exception as e:
+            st.error(f"トレーニング開始中にエラーが発生しました: {str(e)}")
 
     # Display training results
     training_result = wizard_state.get("training_result")
