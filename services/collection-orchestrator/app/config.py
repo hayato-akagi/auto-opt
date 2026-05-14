@@ -1,0 +1,21 @@
+from __future__ import annotations
+
+import os
+
+from pydantic import BaseModel, Field
+
+
+class Settings(BaseModel):
+    simple_controller_url: str = Field(default="http://simple-controller:8003")
+    ai_controller_url: str = Field(default="http://ai-controller:9006")
+    downstream_timeout_sec: float = Field(default=30.0, gt=0.0)
+    max_workers: int = Field(default=4, ge=1, le=32)
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        return cls(
+            simple_controller_url=os.getenv("SIMPLE_CONTROLLER_URL", "http://simple-controller:8003"),
+            ai_controller_url=os.getenv("AI_CONTROLLER_URL", "http://ai-controller:9006"),
+            downstream_timeout_sec=float(os.getenv("DOWNSTREAM_TIMEOUT_SEC", "30.0")),
+            max_workers=int(os.getenv("MAX_WORKERS", "4")),
+        )

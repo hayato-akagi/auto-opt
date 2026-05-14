@@ -17,13 +17,13 @@ class RecipeApiClient:
             "SIMPLE_CONTROLLER_URL", "http://simple-controller:8003"
         ).rstrip("/")
         self.trainer_url = os.getenv(
-            "TRAINER_SERVICE_URL", "http://trainer:8004"
+            "TRAINER_SERVICE_URL", "http://trainer:9008"
         ).rstrip("/")
         self.model_store_url = os.getenv(
-            "MODEL_STORE_SERVICE_URL", "http://model-store:8005"
+            "MODEL_STORE_SERVICE_URL", "http://model-store:9009"
         ).rstrip("/")
         self.ai_controller_url = os.getenv(
-            "AI_CONTROLLER_SERVICE_URL", "http://ai-controller:8006"
+            "AI_CONTROLLER_SERVICE_URL", "http://ai-controller:9006"
         ).rstrip("/")
         self.collection_orchestrator_url = os.getenv(
             "COLLECTION_ORCHESTRATOR_SERVICE_URL", "http://collection-orchestrator:8007"
@@ -290,6 +290,50 @@ class RecipeApiClient:
             st.error(f"{service_name} から不正な JSON レスポンスを受信しました")
         return None
 
+    def _request_external_service_silent(
+        self,
+        method: str,
+        url: str,
+        payload: dict[str, Any] | None = None,
+    ) -> tuple[bool, dict[str, Any] | None, str | None]:
+        """Silent request helper for capability checks.
+
+        Returns tuple[ok, data, error_message].
+        """
+        try:
+            response = self.session.request(
+                method=method,
+                url=url,
+                json=payload,
+                timeout=self.timeout_sec,
+            )
+            response.raise_for_status()
+            if not response.text:
+                return True, {}, None
+            return True, response.json(), None
+        except requests.exceptions.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else "?"
+            detail = ""
+            if exc.response is not None:
+                try:
+                    body = exc.response.json()
+                    if isinstance(body, dict):
+                        detail = str(body.get("detail", ""))
+                except ValueError:
+                    detail = exc.response.text
+            message = f"HTTP {status}"
+            if detail:
+                message = f"{message}: {detail}"
+            return False, None, message
+        except requests.exceptions.ConnectionError:
+            return False, None, "connection error"
+        except requests.exceptions.Timeout:
+            return False, None, "timeout"
+        except requests.exceptions.RequestException as exc:
+            return False, None, str(exc)
+        except ValueError:
+            return False, None, "invalid JSON"
+
     def control_run(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         return self._request_controller("POST", "/control/run", payload)
 
@@ -363,6 +407,15 @@ class RecipeApiClient:
             "Model Store Service",
         )
 
+    def register_model(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Register a new model metadata entry."""
+        return self._request_external_service(
+            "POST",
+            self._model_store_url("/models"),
+            "Model Store Service",
+            payload,
+        )
+
     def promote_model(self, version: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         """Promote a model to production."""
         return self._request_external_service(
@@ -414,3 +467,54 @@ class RecipeApiClient:
             self._collection_orchestrator_url(f"/jobs/{job_id}"),
             "Collection Orchestrator Service",
         )
+
+    # Generic service health/capability methods
+    def get_service_health(self, service: str) -> tuple[bool, dict[str, Any] | None, str | None]:
+        targets = {
+            "trainer": self._trainer_url("/health"),
+            "model_store": self._model_store_url("/health"),
+            "ai_controller": self._ai_controller_url("/health"),
+            "collection_orchestrator": self._collection_orchestrator_url("/health"),
+            "simple_controller": self._controller_url("/health"),
+        }
+        url = targets.get(service)
+        if url is None:
+            return False, None, f"unknown service: {service}"
+        return self._request_external_service_silent("GET", url)
+
+    def check_endpoint(
+        self,
+        service: str,
+        path: str,
+        *,
+        method: str = "GET",
+        payload: dict[str, Any] | None = None,
+    ) -> tuple[bool, dict[str, Any] | None, str | None]:
+        builders = {
+            "trainer": self._trainer_url,
+            "model_store": self._model_store_url,
+            "ai_controller": self._ai_controller_url,
+            "collection_orchestrator": self._collection_orchestrator_url,
+            "simple_controller": self._controller_url,
+        }
+        builder = builders.get(service)
+        if builder is None:
+            return False, None, f"unknown service: {service}"
+        try:
+            response = self.session.request(
+                method=method,
+                url=builder(path),
+                json=payload,
+                timeout=self.timeout_sec,
+            )
+            # Endpoint existence check: treat anything except not found / server-not-implemented as "available".
+            if response.status_code in (404, 501):
+                return False, None, f"HTTP {response.status_code}"
+            if not response.text:
+                return True, {}, None
+            try:
+                return True, response.json(), None
+            except ValueError:
+                return True, None, None
+        except requests.exceptions.RequestException as exc:
+            return False, None, str(exc)

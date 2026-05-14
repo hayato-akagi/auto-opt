@@ -86,8 +86,22 @@ services:
     environment:
       - RECIPE_SERVICE_URL=http://recipe-service:8002
       - SIMPLE_CONTROLLER_URL=http://simple-controller:8003
+      - TRAINER_SERVICE_URL=http://trainer:9008
+      - MODEL_STORE_SERVICE_URL=http://model-store:9009
+      - AI_CONTROLLER_SERVICE_URL=http://ai-controller:9006
+      - COLLECTION_ORCHESTRATOR_SERVICE_URL=http://collection-orchestrator:9007
     depends_on:
       recipe-service:
+        condition: service_healthy
+      simple-controller:
+        condition: service_healthy
+      ai-controller:
+        condition: service_healthy
+      collection-orchestrator:
+        condition: service_healthy
+      trainer:
+        condition: service_healthy
+      model-store:
         condition: service_healthy
     volumes:
       - results-data:/app/data:ro
@@ -108,5 +122,86 @@ services:
       timeout: 5s
       retries: 3
 
+  ai-controller:
+    build:
+      context: ./services/ai-controller
+      dockerfile: Dockerfile.cpu
+    ports:
+      - "9006:9006"
+    environment:
+      - RECIPE_SERVICE_URL=http://recipe-service:8002
+      - MODEL_STORE_URL=http://model-store:9009
+      - DOWNSTREAM_TIMEOUT_SEC=30
+      - DEFAULT_MODEL_TYPE=baseline_only
+    depends_on:
+      recipe-service:
+        condition: service_healthy
+      model-store:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9006/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  collection-orchestrator:
+    build: ./services/collection-orchestrator
+    ports:
+      - "9007:9007"
+    environment:
+      - SIMPLE_CONTROLLER_URL=http://simple-controller:8003
+      - AI_CONTROLLER_URL=http://ai-controller:9006
+      - DOWNSTREAM_TIMEOUT_SEC=30
+      - MAX_WORKERS=4
+    depends_on:
+      simple-controller:
+        condition: service_healthy
+      ai-controller:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9007/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  model-store:
+    build: ./services/model-store
+    ports:
+      - "9009:9009"
+    volumes:
+      - models-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9009/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  trainer:
+    build:
+      context: ./services/trainer
+      dockerfile: Dockerfile.cpu
+    ports:
+      - "9008:9008"
+    environment:
+      - RECIPE_SERVICE_URL=http://recipe-service:8002
+      - MODEL_STORE_URL=http://model-store:9009
+      - SIMPLE_CONTROLLER_URL=http://simple-controller:8003
+      - AI_CONTROLLER_URL=http://ai-controller:9006
+    depends_on:
+      recipe-service:
+        condition: service_healthy
+      model-store:
+        condition: service_healthy
+      simple-controller:
+        condition: service_healthy
+      ai-controller:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9008/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 volumes:
   results-data:
+  models-data:

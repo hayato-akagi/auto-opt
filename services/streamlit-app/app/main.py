@@ -6,20 +6,16 @@ from collections.abc import Callable
 import streamlit as st
 
 from app.api_client import RecipeApiClient
-from app.pages import control, experiment, manual, results, sweep, ai_control, collection, training, model_store
+from app.pages import experiment, manual_confirmation, model_creation, results
 
 PageRenderer = Callable[[RecipeApiClient], None]
 
-PAGES: dict[str, PageRenderer] = {
-    "✅ 実験管理": experiment.render,
-    "✅ 手動操作": manual.render,
-    "✅ スイープ": sweep.render,
-    "✅ 結果閲覧": results.render,
-    "✅ 制御ループ": control.render,
-    "🚧 AI制御": ai_control.render,
-    "🚧 データ収集": collection.render,
-    "🚧 トレーニング": training.render,
-    "🚧 モデルストア": model_store.render,
+# Task-based workflow screens
+SCREENS: dict[str, PageRenderer] = {
+    "1️⃣ 実験作成": experiment.render,
+    "2️⃣ 手動確認": manual_confirmation.render,
+    "3️⃣ モデル学習": model_creation.render,
+    "4️⃣ 結果比較": results.render,
 }
 
 
@@ -31,8 +27,30 @@ def get_api_client() -> RecipeApiClient:
 
 
 def _initialize_state() -> None:
+    """Initialize session state for task-based workflow"""
     st.session_state.setdefault("selected_experiment_id", None)
     st.session_state.setdefault("selected_trial_id", None)
+    st.session_state.setdefault("current_model_version", None)
+    st.session_state.setdefault("collection_job_id", None)
+
+
+def _render_context_header(api_client: RecipeApiClient) -> None:
+    """Render persistent context header showing current experiment and model"""
+    exp_id = st.session_state.get("selected_experiment_id")
+    model_ver = st.session_state.get("current_model_version")
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if exp_id:
+            st.caption(f"📋 **実験**: {exp_id}")
+        else:
+            st.caption("📋 **実験**: 未選択")
+    with col2:
+        if model_ver:
+            st.caption(f"🧠 **モデル版**: {model_ver}")
+        else:
+            st.caption("🧠 **モデル版**: 未学習")
+    st.divider()
 
 
 def main() -> None:
@@ -52,8 +70,13 @@ def main() -> None:
     st.sidebar.caption(f"📊 Collection: {api_client.collection_orchestrator_url}")
     st.sidebar.markdown("---")
 
-    page_name = st.sidebar.radio("ページ", options=list(PAGES.keys()))
-    PAGES[page_name](api_client)
+    screen_name = st.sidebar.radio("タスク型ワークフロー", options=list(SCREENS.keys()))
+    
+    # Render context header on main area
+    _render_context_header(api_client)
+    
+    # Render selected screen
+    SCREENS[screen_name](api_client)
 
 
 if __name__ == "__main__":
