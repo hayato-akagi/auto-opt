@@ -26,6 +26,14 @@ class TrainMetrics(BaseModel):
     epochs: int
 
 
+class EpochLog(BaseModel):
+    """Per-epoch training log entry for progress polling."""
+
+    epoch: int = Field(..., ge=1)
+    loss: float
+    timestamp: str
+
+
 class BenchmarkResultDetail(BaseModel):
     """Benchmark results for a single model."""
 
@@ -46,6 +54,13 @@ class TrainJobStatus(BaseModel):
     train_job_id: str
     status: str  # "running" | "completed" | "failed" | "skipped"
     data_stats: dict | None = None
+    started_at: str | None = None
+    updated_at: str | None = None
+    total_epochs: int | None = None
+    current_epoch: int = 0
+    progress_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    last_loss: float | None = None
+    epoch_logs: list[EpochLog] = Field(default_factory=list)
     train_metrics: TrainMetrics | None = None
     benchmark_results: dict[str, "BenchmarkResultDetail"] | None = None  # keys: "new_model", "current_model"
     promoted: bool | None = None
