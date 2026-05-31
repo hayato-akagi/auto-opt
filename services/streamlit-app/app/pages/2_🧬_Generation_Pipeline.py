@@ -390,6 +390,188 @@ if status:
     else:
         st.info("まだ世代結果がありません。")
 
+    # -----------------------------------------------------------------------
+    # Trajectory viewer
+    # -----------------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("#### 🔍 軌跡ビューア")
+    st.caption("○: ボルト締め前スポット（位置決め後）　■: ボルト締め後スポット　実線: 締め動作　点線: 緩め→再調整")
+
+    exp_id_for_traj = status.get("experiment_id") if status else None
+    gens_with_trials = [
+        g for g in (status.get("generations") or []) if g.get("trial_ids")
+    ] if status else []
+
+    if not gens_with_trials:
+        st.info("trial_ids がまだ記録されていません。次回パイプライン実行から自動収集されます。")
+    else:
+        traj_col1, traj_col2, traj_col3 = st.columns([2, 1, 1])
+        with traj_col1:
+            traj_gen_id = st.selectbox(
+                "世代",
+                options=[g["gen_id"] for g in gens_with_trials],
+                format_func=lambda g: f"Gen {g}  ({next(x['controller'] for x in gens_with_trials if x['gen_id']==g)})",
+                key="traj_gen_select",
+            )
+        with traj_col2:
+            traj_target_x = st.number_input("目標X (mm)", value=0.0, format="%.4f", key="traj_tx")
+        with traj_col3:
+            traj_target_y = st.number_input("目標Y (mm)", value=0.0, format="%.4f", key="traj_ty")
+
+        gen_data = next(g for g in gens_with_trials if g["gen_id"] == traj_gen_id)
+        all_trial_ids = gen_data.get("trial_ids", [])
+
+        selected_trial_ids = st.multiselect(
+            f"試行を選択（全 {len(all_trial_ids)} 件）",
+            options=all_trial_ids,
+            default=all_trial_ids[:min(5, len(all_trial_ids))],
+            format_func=lambda t: f"…{t[-12:]}",
+            key="traj_trial_select",
+        )
+
+        cache_key = f"traj_steps_{exp_id_for_traj}_{'_'.join(selected_trial_ids)}"
+        fetch_btn = st.button("📥 ステップデータを取得", key="traj_fetch", disabled=not selected_trial_ids)
+
+        if fetch_btn and selected_trial_ids:
+            with st.spinner(f"{len(selected_trial_ids)} 試行のステップデータを取得中..."):
+                fetched: dict = {}
+                for tid in selected_trial_ids:
+                    steps = _client().list_steps(exp_id_for_traj, tid)
+                    if steps:
+                        fetched[tid] = steps
+                st.session_state[cache_key] = fetched
+
+        trials_steps: dict = st.session_state.get(cache_key, {})
+
+        if trials_steps:
+            _TRAJ_COLORS = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+                "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+            ]
+
+            def _build_traj_fig(t_steps: dict, space: str, tgt_x: float, tgt_y: float) -> go.Figure:
+                fig = go.Figure()
+
+                def _pts(step: dict) -> tuple[float, float, float, float]:
+                    if space == "spot":
+                        pre = step.get("sim_after_position") or {}
+                        pst = step.get("sim_after_bolt") or {}
+                        return (
+                            float(pre.get("spot_center_x", 0)),
+                            float(pre.get("spot_center_y", 0)),
+                            float(pst.get("spot_center_x", 0)),
+                            float(pst.get("spot_center_y", 0)),
+                        )
+                    else:
+                        pre = step.get("after_position") or {}
+                        pst = step.get("after_bolt") or {}
+                        return (
+                            float(pre.get("actual_x", 0)),
+                            float(pre.get("actual_y", 0)),
+                            float(pst.get("final_x", 0)),
+                            float(pst.get("final_y", 0)),
+                        )
+
+                for i, (tid, steps) in enumerate(t_steps.items()):
+                    if not steps:
+                        continue
+                    color = _TRAJ_COLORS[i % len(_TRAJ_COLORS)]
+                    label = f"…{tid[-10:]}"
+
+                    pxs, pys, qxs, qys = [], [], [], []
+                    for s in steps:
+                        px, py, qx, qy = _pts(s)
+                        pxs.append(px); pys.append(py)
+                        qxs.append(qx); qys.append(qy)
+
+                    # Solid lines: pre→post (bolt tightening)
+                    sx, sy = [], []
+                    for n in range(len(steps)):
+                        sx += [pxs[n], qxs[n], None]
+                        sy += [pys[n], qys[n], None]
+                    fig.add_trace(go.Scatter(
+                        x=sx, y=sy, mode="lines",
+                        line=dict(color=color, width=2.5),
+                        name=label, legendgroup=tid, showlegend=True,
+                    ))
+
+                    # Dashed lines: post[n]→pre[n+1] (bolt loosening + reposition)
+                    if len(steps) > 1:
+                        dx, dy = [], []
+                        for n in range(len(steps) - 1):
+                            dx += [qxs[n], pxs[n + 1], None]
+                            dy += [qys[n], pys[n + 1], None]
+                        fig.add_trace(go.Scatter(
+                            x=dx, y=dy, mode="lines",
+                            line=dict(color=color, width=1.5, dash="dash"),
+                            legendgroup=tid, showlegend=False,
+                        ))
+
+                    # Pre-bolt markers (circle-open)
+                    fig.add_trace(go.Scatter(
+                        x=pxs, y=pys, mode="markers",
+                        marker=dict(symbol="circle-open", size=9, color=color, line=dict(width=2)),
+                        hovertext=[f"{label} Step {s.get('step_index','?')} 位置決め後<br>({px:.4f}, {py:.4f})"
+                                   for s, px, py in zip(steps, pxs, pys)],
+                        hoverinfo="text",
+                        legendgroup=tid, showlegend=False,
+                    ))
+
+                    # Post-bolt markers (filled square)
+                    fig.add_trace(go.Scatter(
+                        x=qxs, y=qys, mode="markers",
+                        marker=dict(symbol="square", size=7, color=color),
+                        hovertext=[f"{label} Step {s.get('step_index','?')} ボルト締め後<br>({qx:.4f}, {qy:.4f})"
+                                   for s, qx, qy in zip(steps, qxs, qys)],
+                        hoverinfo="text",
+                        legendgroup=tid, showlegend=False,
+                    ))
+
+                    # Start marker (larger circle)
+                    fig.add_trace(go.Scatter(
+                        x=[pxs[0]], y=[pys[0]], mode="markers",
+                        marker=dict(symbol="circle", size=13, color=color,
+                                    line=dict(color="white", width=2)),
+                        hovertext=f"{label} START ({pxs[0]:.4f}, {pys[0]:.4f})",
+                        hoverinfo="text",
+                        legendgroup=tid, showlegend=False,
+                    ))
+
+                # Target
+                fig.add_trace(go.Scatter(
+                    x=[tgt_x], y=[tgt_y], mode="markers",
+                    marker=dict(symbol="star", size=18, color="gold",
+                                line=dict(color="black", width=1.5)),
+                    name="目標", showlegend=True,
+                ))
+
+                ax_label = "スポット位置 (mm)" if space == "spot" else "コリメータ位置 (mm)"
+                fig.update_layout(
+                    xaxis_title=f"X {ax_label}",
+                    yaxis_title=f"Y {ax_label}",
+                    yaxis_scaleanchor="x",
+                    yaxis_scaleratio=1,
+                    hovermode="closest",
+                    height=520,
+                    legend=dict(orientation="v"),
+                    margin=dict(t=10),
+                )
+                return fig
+
+            tab_spot, tab_coll = st.tabs(["📍 スポット空間", "🔧 コリメータ空間"])
+            with tab_spot:
+                st.plotly_chart(
+                    _build_traj_fig(trials_steps, "spot", traj_target_x, traj_target_y),
+                    use_container_width=True,
+                )
+            with tab_coll:
+                st.plotly_chart(
+                    _build_traj_fig(trials_steps, "coll", traj_target_x, traj_target_y),
+                    use_container_width=True,
+                )
+        elif selected_trial_ids:
+            st.info("「📥 ステップデータを取得」を押してください。")
+
     # auto refresh
     if status.get("status") == "running" and st.session_state["pipeline_auto_refresh"]:
         time.sleep(2.0)
