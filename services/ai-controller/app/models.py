@@ -8,8 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class ReleasePerturbation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    std_x: float = Field(default=0.0, ge=0.0)
-    std_y: float = Field(default=0.0, ge=0.0)
+    std_x: float = Field(default=0.01, ge=0.0)
+    std_y: float = Field(default=0.01, ge=0.0)
 
 
 class AiControllerConfig(BaseModel):

@@ -154,11 +154,15 @@ def compute_ai_step(
             features_batch = features.reshape(1, -1)
             prediction = model_manager.predict(features_batch)  # (1, 2)
             
-            # Residual is model output (in coll space, mm)
-            residual_x = float(prediction[0, 0])
-            residual_y = float(prediction[0, 1])
-            
-            logger.debug(f"Model prediction: residual=({residual_x:.6f}, {residual_y:.6f})")
+            # Model predicts bolt_shift in spot space; negate and scale to coll space
+            # bolt_shift > 0 means spot moved right → pre-compensate with coll left
+            residual_x = -float(prediction[0, 0]) / config.spot_to_coll_scale_x
+            residual_y = -float(prediction[0, 1]) / config.spot_to_coll_scale_y
+
+            logger.debug(
+                f"Model prediction: bolt_shift=({prediction[0,0]:.6f}, {prediction[0,1]:.6f}), "
+                f"residual=({residual_x:.6f}, {residual_y:.6f})"
+            )
             
         except Exception as e:
             logger.warning(f"Model inference failed: {e}, using baseline only")

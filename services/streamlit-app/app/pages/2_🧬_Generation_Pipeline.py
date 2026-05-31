@@ -69,6 +69,21 @@ with st.sidebar:
     max_steps = st.slider("最大ステップ", 1, 50, 10, disabled=is_running)
     tolerance = st.number_input("収束許容 (mm)", value=0.001, min_value=0.0001, step=0.0001, format="%.4f", disabled=is_running)
 
+    st.markdown("### 🎲 初期位置・緩めノイズ")
+    initial_coll_range = st.slider(
+        "初期コリメータ位置ランダム幅 (mm)",
+        min_value=0.0, max_value=0.3, value=0.05, step=0.01,
+        disabled=is_running,
+        help="各試行の初期レンズ位置を ±range でランダムサンプリング。0 = 全試行が (0,0) スタート。",
+    )
+    release_std = st.slider(
+        "ボルト緩め観測ノイズ std (mm)",
+        min_value=0.0, max_value=0.05, value=0.01, step=0.001,
+        format="%.3f",
+        disabled=is_running,
+        help="ボルト緩め後に制御器が見るスポット位置にガウスノイズを加算。実機の緩め時観測誤差を模倣。",
+    )
+
     st.markdown("---")
     st.markdown("## 🧠 モデル設定")
     n_history = st.slider("履歴ステップ N", 1, 10, 3, disabled=is_running)
@@ -166,7 +181,14 @@ with col_a:
                 "n_generations": int(n_generations),
                 "max_steps": int(max_steps),
                 "tolerance": float(tolerance),
-                "controller_config": {},
+                "controller_config": {
+                    "release_perturbation": {
+                        "std_x": float(release_std),
+                        "std_y": float(release_std),
+                    },
+                },
+                "initial_coll_range_x": float(initial_coll_range),
+                "initial_coll_range_y": float(initial_coll_range),
                 "target": {"spot_center_x": float(target_x), "spot_center_y": float(target_y)},
                 "initial_coll": {"coll_x": 0.0, "coll_y": 0.0},
                 "model_config_train": {

@@ -252,12 +252,28 @@ class GenerationOrchestrator:
         async def _one(trial_idx: int) -> dict[str, Any]:
             env_idx = trial_idx // config.trials_per_env  # round-robin per env
             bolt_override = envs[env_idx] if envs is not None else None
+
+            # Randomize initial coll position per trial using a separate seed namespace
+            # to avoid correlation with the controller's random_seed.
+            if config.initial_coll_range_x > 0.0 or config.initial_coll_range_y > 0.0:
+                init_rng = random.Random(base_seed + trial_idx + 1_000_000)
+                initial_coll = {
+                    "coll_x": config.initial_coll.coll_x + init_rng.uniform(
+                        -config.initial_coll_range_x, config.initial_coll_range_x
+                    ),
+                    "coll_y": config.initial_coll.coll_y + init_rng.uniform(
+                        -config.initial_coll_range_y, config.initial_coll_range_y
+                    ),
+                }
+            else:
+                initial_coll = config.initial_coll.model_dump()
+
             payload = {
                 "experiment_id": experiment_id,
                 "algorithm": controller,
                 "config": ctrl_config,
                 "target": config.target.model_dump(),
-                "initial_coll": config.initial_coll.model_dump(),
+                "initial_coll": initial_coll,
                 "max_steps": config.max_steps,
                 "tolerance": config.tolerance,
                 "random_seed": base_seed + trial_idx,

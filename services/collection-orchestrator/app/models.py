@@ -11,6 +11,15 @@ class HealthResponse(BaseModel):
     version: str
 
 
+class ReleasePerturbationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    std_x: float = Field(default=0.01, ge=0.0,
+                         description="Gaussian std of bolt-release observation noise in x (mm)")
+    std_y: float = Field(default=0.01, ge=0.0,
+                         description="Gaussian std of bolt-release observation noise in y (mm)")
+
+
 class ControllerConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -22,6 +31,9 @@ class ControllerConfig(BaseModel):
     coll_x_max: float = Field(default=0.5)
     coll_y_min: float = Field(default=-0.5)
     coll_y_max: float = Field(default=0.5)
+    release_perturbation: ReleasePerturbationConfig = Field(
+        default_factory=ReleasePerturbationConfig
+    )
 
 
 class TargetSpot(BaseModel):
@@ -165,6 +177,14 @@ class PipelineConfig(BaseModel):
     bolt_distribution: BoltModelDistribution | None = Field(
         default=None,
         description="If set, each env gets a unique bolt_model sampled from this distribution",
+    )
+    initial_coll_range_x: float = Field(
+        default=0.0, ge=0.0,
+        description="Each trial's initial coll_x is sampled from Uniform(base ± range). 0 = fixed.",
+    )
+    initial_coll_range_y: float = Field(
+        default=0.0, ge=0.0,
+        description="Each trial's initial coll_y is sampled from Uniform(base ± range). 0 = fixed.",
     )
     extra_experiment_ids: list[str] = Field(
         default_factory=list,
