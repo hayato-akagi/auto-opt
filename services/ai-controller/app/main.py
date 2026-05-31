@@ -62,11 +62,25 @@ def create_app(
     @app.post("/control/run", response_model=ControlRunResponse)
     async def control_run(payload: ControlRunRequest) -> ControlRunResponse:
         ensure_supported(payload.algorithm)
-        if payload.config.model_version is None:
-            status = resolved_model_manager.status()
-            payload.config.model_version = status.get("loaded_version")
-            payload.config.model_type = str(status.get("model_type") or payload.config.model_type)
-        result = await run_control_loop(payload, resolved_client)
+        
+        # If model_path is provided, create a temporary ModelManager with that model
+        if payload.config.model_path:
+            from pathlib import Path
+            temp_model_manager = ModelManager(
+                model_type=payload.config.model_type,
+                model_path=Path(payload.config.model_path),
+                device="cpu",
+            )
+            payload.config.model_version = payload.config.model_path
+            result = await run_control_loop(payload, resolved_client, temp_model_manager)
+        else:
+            # Use the default model manager
+            if payload.config.model_version is None:
+                status = resolved_model_manager.status()
+                payload.config.model_version = status.get("loaded_version")
+                payload.config.model_type = str(status.get("model_type") or payload.config.model_type)
+            result = await run_control_loop(payload, resolved_client, resolved_model_manager)
+        
         return result
 
     @app.post("/model/reload", response_model=ModelReloadResponse)

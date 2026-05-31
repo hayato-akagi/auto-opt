@@ -37,6 +37,8 @@ class RecipeOrchestrator:
             raise TrialAlreadyCompletedError()
 
         experiment = await self.storage.get_experiment(experiment_id)
+        trial_meta = await self.storage.get_trial_meta(experiment_id, trial_id)
+        bolt_model = trial_meta.get("bolt_model") or experiment["bolt_model"]
         step_index = await self.storage.next_step_index(experiment_id, trial_id)
         
         engine_type = experiment.get("engine_type", "KrakenOS")
@@ -63,7 +65,7 @@ class RecipeOrchestrator:
         bolt_shift = await self.clients.apply_bolt(
             x0=x0,
             y0=y0,
-            bolt_model=experiment["bolt_model"],
+            bolt_model=bolt_model,
             random_seed=_bolt_seed(trial_id, step_index),
         )
 

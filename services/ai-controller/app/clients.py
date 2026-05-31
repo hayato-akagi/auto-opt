@@ -15,10 +15,18 @@ class RecipeClient:
 	async def close(self) -> None:
 		await self._client.aclose()
 
-	async def create_trial(self, experiment_id: str, control: dict[str, Any]) -> dict[str, Any]:
+	async def create_trial(
+		self,
+		experiment_id: str,
+		control: dict[str, Any],
+		bolt_model: dict[str, Any] | None = None,
+	) -> dict[str, Any]:
+		payload: dict[str, Any] = {"mode": "control_loop", "control": control}
+		if bolt_model is not None:
+			payload["bolt_model"] = bolt_model
 		return await self._post_json(
 			f"{self.recipe_service_url}/experiments/{experiment_id}/trials",
-			{"mode": "control_loop", "control": control},
+			payload,
 			"recipe-service",
 		)
 

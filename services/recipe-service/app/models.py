@@ -113,6 +113,7 @@ class TrialStartRequest(BaseModel):
 
     mode: Literal["manual", "control_loop"]
     control: dict[str, Any] | None = None
+    bolt_model: BoltModel | None = None  # per-trial override of experiment bolt_model
 
 
 class TrialCreateResponse(BaseModel):

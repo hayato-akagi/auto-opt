@@ -17,6 +17,7 @@ class AiControllerConfig(BaseModel):
 
     model_type: str = Field(default="baseline_only")
     model_version: str | None = Field(default=None)
+    model_path: str | None = Field(default=None)
     spot_to_coll_scale_x: float = Field(default=50.0, gt=0.0)
     spot_to_coll_scale_y: float = Field(default=50.0, gt=0.0)
     delta_clip_x: float = Field(default=0.05, gt=0.0)
@@ -27,6 +28,10 @@ class AiControllerConfig(BaseModel):
     coll_y_max: float = Field(default=0.5)
     safety_threshold: float = Field(default=0.5, ge=0.0)
     safety_bias: float = Field(default=0.01, ge=0.0)
+    n_history: int | None = Field(
+        default=None, ge=1, le=10,
+        description="History steps for inference. If None, use model's saved n_history.",
+    )
     release_perturbation: ReleasePerturbation = Field(default_factory=ReleasePerturbation)
 
 
@@ -55,6 +60,10 @@ class ControlRunRequest(BaseModel):
     max_steps: int = Field(default=20, ge=0)
     tolerance: float = Field(default=0.001, gt=0.0)
     random_seed: int | None = Field(default=None, ge=0)
+    bolt_model_override: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional per-trial bolt_model override (full BoltModel dict)",
+    )
 
 
 class InitialObservation(BaseModel):

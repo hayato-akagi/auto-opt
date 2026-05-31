@@ -3,11 +3,14 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from .clients import RecipeClient
 from .logic import compute_ai_step
 from .models import ControlRunRequest, ControlRunResponse, InitialObservation
+
+if TYPE_CHECKING:
+    from .model import ModelManager
 
 
 @dataclass
@@ -29,6 +32,7 @@ def _extract_spot(sim_data: dict[str, Any]) -> tuple[float, float, float | None]
 async def run_control_loop(
     request: ControlRunRequest,
     client: RecipeClient,
+    model_manager: ModelManager | None = None,
 ) -> ControlRunResponse:
     rng = random.Random(request.random_seed)
 
@@ -44,7 +48,11 @@ async def run_control_loop(
         "tolerance": request.tolerance,
         "random_seed": request.random_seed,
     }
-    trial = await client.create_trial(request.experiment_id, control_payload)
+    trial = await client.create_trial(
+        request.experiment_id,
+        control_payload,
+        bolt_model=request.bolt_model_override,
+    )
     trial_id = str(trial["trial_id"])
 
     step0 = await client.execute_step(
@@ -88,6 +96,7 @@ async def run_control_loop(
 
     last_step = step0
     steps_executed = 0
+    prev_steps_for_inference: list[dict] = []  # Accumulated history for N>1
 
     for _ in range(request.max_steps):
         pre_x, pre_y, _ = _extract_spot(last_step["sim_after_position"])
@@ -100,6 +109,8 @@ async def run_control_loop(
             current_coll_y=state.commanded_y,
             spot_pre_x=pre_x + state.perturb_x,
             spot_pre_y=pre_y + state.perturb_y,
+            model_manager=model_manager,
+            prev_steps=prev_steps_for_inference,
         )
 
         state.commanded_x = action.next_coll_x
@@ -122,6 +133,7 @@ async def run_control_loop(
             ai_step_log=ai_step_log,
         )
         steps_executed += 1
+        prev_steps_for_inference.append(last_step)  # Save completed step for next iteration
         last_step = step_result
 
         final_post_x, final_post_y, final_post_rms = _extract_spot(step_result["sim_after_bolt"])

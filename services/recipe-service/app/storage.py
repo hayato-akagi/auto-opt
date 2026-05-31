@@ -154,6 +154,7 @@ class RecipeStorage:
         experiment_id: str,
         mode: str,
         control: dict[str, Any] | None,
+        bolt_model: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         await self.get_experiment(experiment_id)
         experiment_dir = self._experiment_dir(experiment_id)
@@ -164,6 +165,7 @@ class RecipeStorage:
             "experiment_id": experiment_id,
             "mode": mode,
             "control": control,
+            "bolt_model": bolt_model,  # optional override
             "started_at": started_at,
         }
         await self._write_json(self._trial_meta_file(experiment_id, trial_id), trial_meta)

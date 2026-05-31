@@ -16,6 +16,23 @@ class TrainRequest(BaseModel):
     )
     epochs: int = Field(default=50, ge=1, le=500)
     batch_size: int = Field(default=32, ge=1, le=256)
+    n_history: int = Field(
+        default=3, ge=1, le=10,
+        description="Number of past steps to use as features (1-10)",
+    )
+    hidden_dim: int = Field(
+        default=128, gt=0, le=2048,
+        description="MLP hidden layer size",
+    )
+    learning_rate: float = Field(default=1e-3, gt=0.0)
+    only_converged: bool = Field(
+        default=False,
+        description="If True, only use trials that converged for training",
+    )
+    init_from_model_path: str | None = Field(
+        default=None,
+        description="Optional .pt path to warm-start weights from (must match architecture)",
+    )
 
 
 class TrainMetrics(BaseModel):

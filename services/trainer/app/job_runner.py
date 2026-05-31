@@ -1,4 +1,195 @@
-"""Async training job runner.
+"""Async training job runner."""
 
-To be implemented. See docs/11-trainer.md.
-"""
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from .clients import RecipeServiceClient
+from .data import collect_training_data, normalize_features
+from .models import TrainRequest, TrainJobStatus, TrainMetrics, EpochLog
+from .train import TrainingConfig, train_model, save_model
+
+logger = logging.getLogger(__name__)
+
+
+async def run_training_job(
+    train_job_id: str,
+    request: TrainRequest,
+    jobs_dict: dict[str, TrainJobStatus],
+    recipe_client: RecipeServiceClient,
+) -> None:
+    """Background training job that updates progress in jobs_dict.
+    
+    Args:
+        train_job_id: Job identifier
+        request: Training request
+        jobs_dict: Shared dictionary for job status
+        recipe_client: Client for recipe-service
+    """
+    try:
+        # Initialize job status
+        job = jobs_dict[train_job_id]
+        job.status = "running"
+        job.updated_at = _utc_now_iso()
+        
+        # Step 1: Collect training data from recipe-service
+        logger.info(f"[{train_job_id}] Collecting training data from experiments: {request.experiment_ids}")
+        
+        experiments_data = []
+        for exp_id in request.experiment_ids:
+            exp = recipe_client.get_experiment(exp_id)
+            if not exp:
+                logger.warning(f"Experiment {exp_id} not found")
+                continue
+            
+            trials = recipe_client.get_trials(exp_id)
+            exp["trials"] = trials
+            experiments_data.append(exp)
+        
+        if not experiments_data:
+            raise ValueError("No valid experiments found")
+        
+        # Define get_trial_steps function for data collection
+        def get_trial_steps(exp_id: str, trial_id: str) -> list[dict]:
+            return recipe_client.get_steps(exp_id, trial_id)
+        
+        features, labels = collect_training_data(
+            experiments_data,
+            get_trial_steps,
+            n_history=request.n_history,
+            only_converged=request.only_converged,
+        )
+        
+        if len(features) == 0:
+            raise ValueError("No training samples collected")
+        
+        logger.info(f"[{train_job_id}] Collected {len(features)} training samples")
+        
+        # Update job stats
+        job.data_stats = {
+            "experiment_count": len(experiments_data),
+            "total_samples": len(features),
+        }
+        job.updated_at = _utc_now_iso()
+        
+        # Step 2: Normalize features
+        normalized_features, stats = normalize_features(features)
+        
+        # Step 3: Train model
+        logger.info(f"[{train_job_id}] Starting training: model_type={request.model_type}, epochs={request.epochs}")
+        
+        config = TrainingConfig(
+            epochs=request.epochs,
+            batch_size=request.batch_size,
+            learning_rate=request.learning_rate,
+            val_split=0.1,
+            hidden_dim=request.hidden_dim,
+            n_history=request.n_history,
+            device="cpu",  # TODO: Support GPU
+        )
+        
+        # Training with progress updates
+        model, metrics = await _train_with_progress(
+            normalized_features,
+            labels,
+            request.model_type,
+            config,
+            train_job_id,
+            jobs_dict,
+            init_from_model_path=request.init_from_model_path,
+        )
+        
+        logger.info(f"[{train_job_id}] Training completed: final_loss={metrics['final_train_loss']:.6f}")
+        
+        # Step 4: Save model
+        model_dir = Path("/app/models")
+        model_dir.mkdir(parents=True, exist_ok=True)
+        model_path = model_dir / f"{train_job_id}.pt"
+        
+        save_model(
+            model,
+            model_path,
+            model_type=request.model_type,
+            config=config,
+            feature_stats=stats,
+            metadata={
+                "train_job_id": train_job_id,
+                "experiment_ids": request.experiment_ids,
+                "n_samples": len(features),
+            },
+            metrics=metrics,
+        )
+        
+        logger.info(f"[{train_job_id}] Model saved to {model_path}")
+        
+        # Step 5: Update job status
+        job.status = "completed"
+        job.progress_rate = 1.0
+        job.train_metrics = TrainMetrics(
+            epoch_losses=metrics["epoch_losses"],
+            final_train_loss=metrics["final_train_loss"],
+            epochs=request.epochs,
+        )
+        job.promoted = True
+        job.promoted_version = f"v_{train_job_id}"
+        job.updated_at = _utc_now_iso()
+        
+        logger.info(f"[{train_job_id}] Job completed successfully")
+        
+    except Exception as exc:
+        logger.error(f"[{train_job_id}] Training failed: {exc}", exc_info=True)
+        
+        job = jobs_dict.get(train_job_id)
+        if job:
+            job.status = "failed"
+            job.error_message = str(exc)
+            job.updated_at = _utc_now_iso()
+
+
+async def _train_with_progress(
+    features,
+    labels,
+    model_type: str,
+    config: TrainingConfig,
+    train_job_id: str,
+    jobs_dict: dict[str, TrainJobStatus],
+    init_from_model_path: str | None = None,
+):
+    """Train model with progress updates (simplified - actual training is sync)."""
+    # Note: This is a simplified version. In production, you might want to
+    # make the training loop itself async with periodic updates.
+    
+    # For now, just run training synchronously and update at the end
+    model, metrics = train_model(
+        features,
+        labels,
+        model_type=model_type,
+        config=config,
+        init_from_model_path=init_from_model_path,
+    )
+    
+    # Update progress with epoch logs
+    job = jobs_dict[train_job_id]
+    job.current_epoch = config.epochs
+    job.progress_rate = 1.0
+    job.last_loss = metrics["final_train_loss"]
+    
+    # Create epoch logs
+    for epoch, loss in enumerate(metrics["epoch_losses"], start=1):
+        job.epoch_logs.append(
+            EpochLog(
+                epoch=epoch,
+                loss=loss,
+                timestamp=_utc_now_iso(),
+            )
+        )
+    
+    return model, metrics
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()

@@ -468,6 +468,38 @@ class RecipeApiClient:
             "Collection Orchestrator Service",
         )
 
+    # Pipeline (generation) methods
+    def start_pipeline(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Start a multi-generation training pipeline."""
+        return self._request_external_service(
+            "POST",
+            self._collection_orchestrator_url("/experiments/pipeline"),
+            "Collection Orchestrator Service",
+            payload,
+        )
+
+    def get_pipeline_status(self, pipeline_id: str) -> dict[str, Any] | None:
+        """Poll status of a pipeline."""
+        return self._request_external_service(
+            "GET",
+            self._collection_orchestrator_url(f"/experiments/pipeline/{pipeline_id}"),
+            "Collection Orchestrator Service",
+        )
+
+    def list_pipelines(self) -> list[dict[str, Any]] | None:
+        data = self._request_external_service(
+            "GET",
+            self._collection_orchestrator_url("/experiments/pipeline"),
+            "Collection Orchestrator Service",
+        )
+        if data is None:
+            return None
+        pipelines = data.get("pipelines")
+        if isinstance(pipelines, list):
+            return pipelines
+        st.error("Collection Orchestrator Service のパイプライン一覧レスポンス形式が不正です")
+        return None
+
     # Generic service health/capability methods
     def get_service_health(self, service: str) -> tuple[bool, dict[str, Any] | None, str | None]:
         targets = {
@@ -518,3 +550,11 @@ class RecipeApiClient:
                 return True, None, None
         except requests.exceptions.RequestException as exc:
             return False, None, str(exc)
+
+    def reload_ai_model(self) -> dict[str, Any] | None:
+        """Reload AI controller model after promotion."""
+        return self._request_external_service(
+            "POST",
+            self._ai_controller_url("/model/reload"),
+            "AI Controller Service",
+        )

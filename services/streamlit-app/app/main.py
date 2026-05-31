@@ -1,83 +1,94 @@
-from __future__ import annotations
-
-import os
-from collections.abc import Callable
+"""Auto-Opt: 世代交代型並列学習システム ホーム画面"""
 
 import streamlit as st
 
-from app.api_client import RecipeApiClient
-from app.pages import experiment, manual_confirmation, model_creation, results
+st.set_page_config(
+    page_title="Auto-Opt: 世代交代型並列学習",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-PageRenderer = Callable[[RecipeApiClient], None]
+st.title("🎯 Auto-Opt: 世代交代型並列学習システム")
 
-# Task-based workflow screens
-SCREENS: dict[str, PageRenderer] = {
-    "1️⃣ 実験作成": experiment.render,
-    "2️⃣ 手動確認": manual_confirmation.render,
-    "3️⃣ モデル学習": model_creation.render,
-    "4️⃣ 結果比較": results.render,
-}
+st.markdown("""
+ボルト締めによる位置ズレ（非線形・位置依存性あり）を克服し、
+スポット位置を目標から **±1μm 以内** に収めるための世代交代型並列学習シミュレーターです。
 
+---
 
-@st.cache_resource
-def get_api_client() -> RecipeApiClient:
-    return RecipeApiClient(
-        base_url=os.getenv("RECIPE_SERVICE_URL", "http://recipe-service:8002")
-    )
+## 🚀 クイックスタート (3 ステップ)
 
+### ① 🌍 **環境設定** ページを開く
+- サイドバーで **実験名** と **ボルトモデルの偏り** (`x0_bias_x`, `a_x` など) を設定
+- 必要に応じてページ下部の **🔬 光学系パラメータ** エキスパンダーを開いて
+  `wavelength` / `obj_f` / `sensor_pos` / カメラ等を調整（デフォルトでも動作）
+- **🚀 実験を作成** を押し、表示される `experiment_id` をコピー
 
-def _initialize_state() -> None:
-    """Initialize session state for task-based workflow"""
-    st.session_state.setdefault("selected_experiment_id", None)
-    st.session_state.setdefault("selected_trial_id", None)
-    st.session_state.setdefault("current_model_version", None)
-    st.session_state.setdefault("collection_job_id", None)
+### ② 🧬 **世代交代パイプライン** ページに移動
+- サイドバー上部の **experiment_id** に貼り付け
+- 並列環境数 / 世代数 / **収束許容 (デフォルト 0.001 mm)** などを設定
+- 任意で
+    - 🧠 **累積学習** (warm-start)
+    - 🌐 **環境ごとに bolt_model をサンプル** (multi-env)
+- **▶️ パイプライン開始** を押すと **Gen0 (simple) → 学習 → Gen1+ (ai)** が順に実行
 
+### ③ 📊 **ベンチマーク** ページで結果を比較
+- 複数パイプラインの 合格率 / 収束ステップ数 / 学習ロス を重ねて確認
 
-def _render_context_header(api_client: RecipeApiClient) -> None:
-    """Render persistent context header showing current experiment and model"""
-    exp_id = st.session_state.get("selected_experiment_id")
-    model_ver = st.session_state.get("current_model_version")
-    
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if exp_id:
-            st.caption(f"📋 **実験**: {exp_id}")
-        else:
-            st.caption("📋 **実験**: 未選択")
-    with col2:
-        if model_ver:
-            st.caption(f"🧠 **モデル版**: {model_ver}")
-        else:
-            st.caption("🧠 **モデル版**: 未学習")
-    st.divider()
+### ④ 🧪 **モデルプレイグラウンド** ページで保存済みモデルを試す
+- パイプラインで保存された `.pt` を選択し、任意の experiment / 目標で複数試行
+- 最終スポット分布・収束ステップ・成功率を可視化
 
+---
 
-def main() -> None:
-    st.set_page_config(page_title="auto-opt streamlit-app", layout="wide")
-    _initialize_state()
+## 💡 よくある質問
 
-    api_client = get_api_client()
+**Q: `wavelength` や `obj_f` などの光学パラメータはどこで設定？**
+🌍 環境設定ページ下部の **🔬 光学系パラメータ** エキスパンダーから編集できます。
+触らなければデフォルト値で実験が作成されます。
 
-    st.sidebar.title("auto-opt")
-    st.sidebar.markdown("---")
-    st.sidebar.caption("🔌 **接続サービス**")
-    st.sidebar.caption(f"📋 Recipe: {api_client.base_url}")
-    st.sidebar.caption(f"⚡ Controller: {api_client.simple_controller_url}")
-    st.sidebar.caption(f"🧠 Trainer: {api_client.trainer_url}")
-    st.sidebar.caption(f"🏪 Model Store: {api_client.model_store_url}")
-    st.sidebar.caption(f"🤖 AI Controller: {api_client.ai_controller_url}")
-    st.sidebar.caption(f"📊 Collection: {api_client.collection_orchestrator_url}")
-    st.sidebar.markdown("---")
+**Q: 収束許容はどれくらいが適切？**
+デフォルトは 0.001 mm (= 1 μm)。試行錯誤の段階では 0.01 mm 程度から始めると
+進捗が見やすいです。
 
-    screen_name = st.sidebar.radio("タスク型ワークフロー", options=list(SCREENS.keys()))
-    
-    # Render context header on main area
-    _render_context_header(api_client)
-    
-    # Render selected screen
-    SCREENS[screen_name](api_client)
+**Q: 何世代ぐらい回せばよい？**
+3〜5 世代、並列環境 10〜50 程度から始め、収束ステップが減るかを確認します。
 
+---
 
-if __name__ == "__main__":
-    main()
+## 🔬 技術背景
+
+### モデルアーキテクチャ
+- **入力**: 過去Nステップの履歴 + 現在のスポット位置（最大 62 次元）
+- **出力**: ボルト調整量 (delta_x, delta_y)
+- **学習**: オフライン教師あり回帰
+
+### 世代交代戦略
+1. **Gen0**: simple-controller でベースラインデータ収集
+2. **Gen1**: Gen0 データで学習 → ai-controller で新データ収集
+3. **Gen2+**: 累積データで再学習（warm-start ON で前世代の重みから継続）
+
+---
+
+<small>
+**バージョン**: 0.3.0 (A: multi-env, B: warm-start, C: 詳細メトリクス 実装済み)
+**最終更新**: 2026年6月1日
+</small>
+""")
+
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### 📖 クイックガイド")
+    st.markdown("""
+    1. 🌍 **環境設定**: 実験を作成し ID をコピー
+    2. 🧬 **パイプライン**: ID を貼って学習実行
+    3. 📊 **ベンチマーク**: 結果を比較
+    """)
+
+    st.markdown("---")
+    st.markdown("### ℹ️ システム情報")
+    st.info("""
+    **Phase 3**: 複数環境 + 累積学習 + 詳細メトリクス対応
+    **バックエンド**: recipe-service / orchestrator / trainer
+    """)

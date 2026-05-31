@@ -44,7 +44,11 @@ async def run_control_loop(request: ControlRunRequest, client: RecipeClient) -> 
         "tolerance": request.tolerance,
         "random_seed": request.random_seed,
     }
-    trial = await client.create_trial(request.experiment_id, control_payload)
+    trial = await client.create_trial(
+        request.experiment_id,
+        control_payload,
+        bolt_model=request.bolt_model_override,
+    )
     trial_id = str(trial["trial_id"])
 
     # Step 0: initial observation (not counted in max_steps)

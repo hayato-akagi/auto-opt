@@ -138,6 +138,8 @@ services:
         condition: service_healthy
       model-store:
         condition: service_healthy
+    volumes:
+      - models-data:/app/models
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9006/health"]
       interval: 10s
@@ -151,6 +153,8 @@ services:
     environment:
       - SIMPLE_CONTROLLER_URL=http://simple-controller:8003
       - AI_CONTROLLER_URL=http://ai-controller:9006
+      - TRAINER_URL=http://trainer:9008
+      - RECIPE_SERVICE_URL=http://recipe-service:8002
       - DOWNSTREAM_TIMEOUT_SEC=30
       - MAX_WORKERS=4
     depends_on:
@@ -196,6 +200,8 @@ services:
         condition: service_healthy
       ai-controller:
         condition: service_healthy
+    volumes:
+      - models-data:/app/models
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9008/health"]
       interval: 10s

@@ -35,3 +35,42 @@ class ControllerClient:
 		if not isinstance(body, dict):
 			raise ValueError("invalid response payload")
 		return body
+
+
+class TrainerClient:
+	"""HTTP client for trainer service."""
+
+	def __init__(self, *, trainer_url: str, timeout_sec: float) -> None:
+		self.trainer_url = trainer_url.rstrip("/")
+		self._client = httpx.AsyncClient(timeout=timeout_sec)
+
+	async def close(self) -> None:
+		await self._client.aclose()
+
+	async def start_training(self, payload: dict[str, Any]) -> dict[str, Any]:
+		response = await self._client.post(f"{self.trainer_url}/train", json=payload)
+		response.raise_for_status()
+		return response.json()
+
+	async def get_job(self, train_job_id: str) -> dict[str, Any]:
+		response = await self._client.get(f"{self.trainer_url}/train/{train_job_id}")
+		response.raise_for_status()
+		return response.json()
+
+
+class RecipeClient:
+	"""HTTP client for recipe-service (orchestrator side)."""
+
+	def __init__(self, *, recipe_service_url: str, timeout_sec: float) -> None:
+		self.recipe_service_url = recipe_service_url.rstrip("/")
+		self._client = httpx.AsyncClient(timeout=timeout_sec)
+
+	async def close(self) -> None:
+		await self._client.aclose()
+
+	async def get_experiment(self, experiment_id: str) -> dict[str, Any]:
+		response = await self._client.get(
+			f"{self.recipe_service_url}/experiments/{experiment_id}"
+		)
+		response.raise_for_status()
+		return response.json()

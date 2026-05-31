@@ -51,6 +51,10 @@ class ControlRunRequest(BaseModel):
     max_steps: int = Field(default=20, ge=0)
     tolerance: float = Field(default=0.001, gt=0.0)
     random_seed: int | None = Field(default=None, ge=0)
+    bolt_model_override: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional per-trial bolt_model override (full BoltModel dict)",
+    )
 
 
 class ControlStepState(BaseModel):

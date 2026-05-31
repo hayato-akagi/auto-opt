@@ -106,6 +106,7 @@ def create_app(
             experiment_id,
             mode=payload.mode,
             control=payload.control,
+            bolt_model=payload.bolt_model.model_dump() if payload.bolt_model else None,
         )
         return TrialCreateResponse(**trial)
 
