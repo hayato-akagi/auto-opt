@@ -25,6 +25,9 @@ class RecipeApiClient:
         self.ai_controller_url = os.getenv(
             "AI_CONTROLLER_SERVICE_URL", "http://ai-controller:9006"
         ).rstrip("/")
+        self.lstm_controller_url = os.getenv(
+            "LSTM_CONTROLLER_SERVICE_URL", "http://lstm-controller:9012"
+        ).rstrip("/")
         self.collection_orchestrator_url = os.getenv(
             "COLLECTION_ORCHESTRATOR_SERVICE_URL", "http://collection-orchestrator:8007"
         ).rstrip("/")
@@ -45,6 +48,9 @@ class RecipeApiClient:
 
     def _ai_controller_url(self, path: str) -> str:
         return f"{self.ai_controller_url}{path}"
+
+    def _lstm_controller_url(self, path: str) -> str:
+        return f"{self.lstm_controller_url}{path}"
 
     def _collection_orchestrator_url(self, path: str) -> str:
         return f"{self.collection_orchestrator_url}{path}"
@@ -435,6 +441,31 @@ class RecipeApiClient:
             payload,
         )
 
+    def run_lstm_control(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Run LSTM-based control loop."""
+        return self._request_external_service(
+            "POST",
+            self._lstm_controller_url("/control/run"),
+            "LSTM Controller Service",
+            payload,
+        )
+
+    def get_lstm_model_status(self) -> dict[str, Any] | None:
+        """Get LSTM controller model status."""
+        return self._request_external_service(
+            "GET",
+            self._lstm_controller_url("/model/status"),
+            "LSTM Controller Service",
+        )
+
+    def reload_lstm_model(self) -> dict[str, Any] | None:
+        """Reload LSTM controller model."""
+        return self._request_external_service(
+            "POST",
+            self._lstm_controller_url("/model/reload"),
+            "LSTM Controller Service",
+        )
+
     # Collection orchestrator service methods
     def start_collection_job(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """Start a data collection job."""
@@ -506,6 +537,7 @@ class RecipeApiClient:
             "trainer": self._trainer_url("/health"),
             "model_store": self._model_store_url("/health"),
             "ai_controller": self._ai_controller_url("/health"),
+            "lstm_controller": self._lstm_controller_url("/health"),
             "collection_orchestrator": self._collection_orchestrator_url("/health"),
             "simple_controller": self._controller_url("/health"),
         }
@@ -526,6 +558,7 @@ class RecipeApiClient:
             "trainer": self._trainer_url,
             "model_store": self._model_store_url,
             "ai_controller": self._ai_controller_url,
+            "lstm_controller": self._lstm_controller_url,
             "collection_orchestrator": self._collection_orchestrator_url,
             "simple_controller": self._controller_url,
         }

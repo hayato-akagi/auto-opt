@@ -114,7 +114,7 @@ class GenerationOrchestrator:
             consecutive_success = 0
 
             for gen_id in range(config.n_generations):
-                controller = "simple-controller" if gen_id == 0 else "ai-controller"
+                controller = config.gen0_controller if gen_id == 0 else config.gen1plus_controller
                 gen = GenerationResult(
                     gen_id=gen_id,
                     status="collecting",
@@ -246,6 +246,11 @@ class GenerationOrchestrator:
             ctrl_config["model_type"] = "mlp"
             ctrl_config["model_path"] = model_path
             ctrl_config["n_history"] = config.model_config_train.n_history
+        elif controller == "lstm-controller":
+            ctrl_config["model_type"] = "lstm"
+            ctrl_config["model_path"] = model_path
+        elif controller == "adaptive-controller":
+            ctrl_config["alpha"] = config.adaptive_alpha
 
         semaphore = asyncio.Semaphore(max(1, config.n_parallel_envs))
 
@@ -311,13 +316,15 @@ class GenerationOrchestrator:
         """
         m = config.model_config_train
         all_experiment_ids = [experiment_id] + list(config.extra_experiment_ids)
+        model_type = "lstm" if config.gen1plus_controller == "lstm-controller" else "mlp"
         payload: dict[str, Any] = {
             "experiment_ids": all_experiment_ids,
-            "model_type": "mlp",
+            "model_type": model_type,
             "epochs": m.epochs,
             "batch_size": m.batch_size,
             "n_history": m.n_history,
             "hidden_dim": m.hidden_dim,
+            "num_layers": m.num_layers,
             "learning_rate": m.learning_rate,
             "only_converged": m.only_converged,
         }

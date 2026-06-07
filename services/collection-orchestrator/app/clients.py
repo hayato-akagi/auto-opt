@@ -11,10 +11,14 @@ class ControllerClient:
 		*,
 		simple_controller_url: str,
 		ai_controller_url: str,
+		adaptive_controller_url: str,
+		lstm_controller_url: str,
 		timeout_sec: float,
 	) -> None:
 		self.simple_controller_url = simple_controller_url.rstrip("/")
 		self.ai_controller_url = ai_controller_url.rstrip("/")
+		self.adaptive_controller_url = adaptive_controller_url.rstrip("/")
+		self.lstm_controller_url = lstm_controller_url.rstrip("/")
 		self._client = httpx.AsyncClient(timeout=timeout_sec)
 
 	async def close(self) -> None:
@@ -25,6 +29,10 @@ class ControllerClient:
 			base = self.simple_controller_url
 		elif algorithm == "ai-controller":
 			base = self.ai_controller_url
+		elif algorithm == "adaptive-controller":
+			base = self.adaptive_controller_url
+		elif algorithm == "lstm-controller":
+			base = self.lstm_controller_url
 		else:
 			raise ValueError(f"unsupported algorithm: {algorithm}")
 

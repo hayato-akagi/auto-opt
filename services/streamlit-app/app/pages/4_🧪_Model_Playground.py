@@ -105,8 +105,20 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("## ⚙️ 推論設定")
+    controller_choice = st.radio(
+        "コントローラー",
+        ["ai-controller (MLP)", "lstm-controller (LSTM)"],
+        index=0,
+        help="モデルの種類に合わせて選択してください。",
+    )
+    use_lstm = controller_choice.startswith("lstm")
     default_n_hist = (selected or {}).get("n_history") or 3
-    n_history = st.slider("n_history", 1, 10, int(default_n_hist))
+    n_history = st.slider(
+        "n_history",
+        1, 10, int(default_n_hist),
+        disabled=use_lstm,
+        help="LSTM では使用しません",
+    )
     n_trials = st.slider("試行回数", 1, 100, 10)
     max_steps = st.slider("最大ステップ", 1, 50, 10)
     tolerance = st.number_input(
@@ -123,16 +135,26 @@ st.subheader("▶️ 実行")
 
 run_disabled = not (model_path and experiment_id.strip())
 if st.button("🚀 推論実行", type="primary", disabled=run_disabled, use_container_width=False):
+    if use_lstm:
+        algorithm = "lstm-controller"
+        config_payload: dict[str, Any] = {
+            "model_type": "lstm",
+            "model_path": model_path,
+        }
+    else:
+        algorithm = "ai-controller"
+        config_payload = {
+            "model_type": "mlp",
+            "model_path": model_path,
+            "n_history": int(n_history),
+        }
+
     payloads = []
     for i in range(int(n_trials)):
         payloads.append({
             "experiment_id": experiment_id.strip(),
-            "algorithm": "ai-controller",
-            "config": {
-                "model_type": "mlp",
-                "model_path": model_path,
-                "n_history": int(n_history),
-            },
+            "algorithm": algorithm,
+            "config": config_payload,
             "target": {"spot_center_x": float(target_x), "spot_center_y": float(target_y)},
             "initial_coll": {"coll_x": float(init_x), "coll_y": float(init_y)},
             "max_steps": int(max_steps),
@@ -143,7 +165,7 @@ if st.button("🚀 推論実行", type="primary", disabled=run_disabled, use_con
     results: list[dict[str, Any]] = []
     progress = st.progress(0.0, text="実行中...")
     for i, pl in enumerate(payloads):
-        r = client.run_ai_control(pl)
+        r = client.run_lstm_control(pl) if use_lstm else client.run_ai_control(pl)
         if r:
             results.append(r)
         progress.progress((i + 1) / len(payloads), text=f"{i+1}/{len(payloads)} 完了")
@@ -213,7 +235,7 @@ fig_scatter.add_trace(go.Scatter(
 ))
 fig_scatter.add_trace(go.Scatter(
     x=[tx], y=[ty], mode="markers",
-    marker=dict(size=18, symbol="x", color="blue", line=dict(width=3)),
+    marker=dict(size=18, symbol="cross", color="red", line=dict(width=3, color="red")),
     name="target",
 ))
 # tolerance circle

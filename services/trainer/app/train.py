@@ -45,6 +45,7 @@ class TrainingConfig:
     hidden_dim: int = 128
     max_history_steps: int = DEFAULT_MAX_HISTORY_STEPS  # Model's input dim source
     n_history: int = 3  # Actual history steps used (1..max_history_steps)
+    num_layers: int = 2  # LSTM number of layers
     device: str = "cpu"
 
 
@@ -81,33 +82,82 @@ class BoltShiftMLP(nn.Module):
 
 class BaselineOnlyModel(nn.Module):
     """Dummy model that always outputs zero (baseline-only fallback)."""
-    
+
     def __init__(self, output_dim: int = 2):
         super().__init__()
         self.dummy = nn.Parameter(torch.zeros(1))  # Just to have parameters
         self.output_dim = output_dim
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch_size = x.shape[0]
         return torch.zeros(batch_size, self.output_dim, device=x.device, dtype=x.dtype)
 
 
-def create_model(model_type: str, config: TrainingConfig) -> nn.Module:
-    """Create model based on type.
-    
-    Args:
-        model_type: "mlp" or "baseline_only"
-        config: Training configuration
-        
-    Returns:
-        PyTorch model
+# LSTM constants (must match lstm-controller's model.py)
+LSTM_INPUT_DIM = 8   # 6 prev-step features + 2 current position
+LSTM_OUTPUT_DIM = 2  # bolt_shift (x, y)
+
+
+class BoltShiftLSTM(nn.Module):
+    """LSTM for step-by-step bolt shift prediction.
+
+    Processes one step at a time and carries hidden state across steps
+    within a trial.  For training, the full trial sequence is fed at once
+    (batch_first=True).
     """
+
+    def __init__(
+        self,
+        input_dim: int = LSTM_INPUT_DIM,
+        hidden_dim: int = 128,
+        num_layers: int = 2,
+        output_dim: int = LSTM_OUTPUT_DIM,
+    ):
+        super().__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        self.lstm = nn.LSTM(
+            input_size=input_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+        )
+        self.fc = nn.Linear(hidden_dim, output_dim)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        h_c=None,
+    ) -> tuple[torch.Tensor, tuple]:
+        """Forward pass over a full sequence.
+
+        Args:
+            x: (batch, seq_len, input_dim)
+            h_c: optional initial (h_0, c_0)
+
+        Returns:
+            predictions: (batch, seq_len, output_dim)
+            (h_n, c_n)
+        """
+        out, (h_n, c_n) = self.lstm(x, h_c)
+        return self.fc(out), (h_n, c_n)
+
+
+def create_model(model_type: str, config: TrainingConfig) -> nn.Module:
+    """Create model based on type."""
     if model_type == "baseline_only":
         return BaselineOnlyModel()
     elif model_type == "mlp":
         return BoltShiftMLP(
             max_history_steps=config.max_history_steps,
             hidden_dim=config.hidden_dim,
+        )
+    elif model_type == "lstm":
+        return BoltShiftLSTM(
+            input_dim=LSTM_INPUT_DIM,
+            hidden_dim=config.hidden_dim,
+            num_layers=config.num_layers,
         )
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
@@ -241,6 +291,78 @@ def train_model(
     return model, metrics
 
 
+def train_lstm_sequences(
+    sequences: list[tuple[np.ndarray, np.ndarray]],
+    config: TrainingConfig,
+    feature_stats: dict[str, np.ndarray],
+) -> tuple[nn.Module, dict[str, Any]]:
+    """Train BoltShiftLSTM on per-trial sequences using BPTT.
+
+    Args:
+        sequences: List of (features_seq, labels_seq) per trial.
+                   features_seq: (T, 8), labels_seq: (T, 2)
+        config: Training configuration (hidden_dim, num_layers, epochs, lr, device)
+        feature_stats: Pre-computed {"mean": (8,), "std": (8,)} for normalization
+
+    Returns:
+        (model, metrics)
+    """
+    if torch is None:
+        raise RuntimeError("PyTorch not available")
+
+    device = torch.device(config.device)
+    mean = torch.from_numpy(feature_stats["mean"]).float().to(device)
+    std = torch.from_numpy(feature_stats["std"]).float().to(device)
+
+    model = BoltShiftLSTM(
+        input_dim=LSTM_INPUT_DIM,
+        hidden_dim=config.hidden_dim,
+        num_layers=config.num_layers,
+    ).to(device)
+
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
+
+    # Pre-convert sequences to tensors (normalized)
+    tensors: list[tuple[torch.Tensor, torch.Tensor]] = []
+    for feat_seq, label_seq in sequences:
+        x = torch.from_numpy(feat_seq).float().to(device)
+        x = (x - mean) / (std + 1e-8)
+        y = torch.from_numpy(label_seq).float().to(device)
+        tensors.append((x.unsqueeze(0), y.unsqueeze(0)))  # (1, T, 8), (1, T, 2)
+
+    epoch_losses: list[float] = []
+
+    for epoch in range(config.epochs):
+        model.train()
+        total_loss = 0.0
+        indices = np.random.permutation(len(tensors))
+
+        for idx in indices:
+            x, y = tensors[idx]
+            optimizer.zero_grad()
+            preds, _ = model(x)   # (1, T, 2)
+            loss = criterion(preds, y)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+
+        avg_loss = total_loss / max(len(tensors), 1)
+        epoch_losses.append(avg_loss)
+
+        if (epoch + 1) % 10 == 0 or epoch == 0:
+            logger.info(
+                f"LSTM Epoch {epoch + 1}/{config.epochs} - loss: {avg_loss:.6f}"
+            )
+
+    return model, {
+        "epoch_losses": epoch_losses,
+        "val_losses": [],
+        "final_train_loss": epoch_losses[-1] if epoch_losses else 0.0,
+        "final_val_loss": 0.0,
+    }
+
+
 def save_model(
     model: nn.Module,
     save_path: Path,
@@ -272,6 +394,7 @@ def save_model(
         save_dict["hidden_dim"] = config.hidden_dim
         save_dict["max_history_steps"] = config.max_history_steps
         save_dict["n_history"] = config.n_history
+        save_dict["num_layers"] = config.num_layers
     
     if feature_stats is not None:
         save_dict["feature_mean"] = feature_stats.get("mean")

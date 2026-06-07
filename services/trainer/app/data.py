@@ -212,6 +212,97 @@ def _extract_label(curr_step: dict[str, Any]) -> np.ndarray | None:
         return None
 
 
+def collect_training_sequences(
+    experiments: list[dict[str, Any]],
+    get_trial_steps: callable,
+    only_converged: bool = False,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Collect per-trial step sequences for LSTM training.
+
+    Each element in the returned list corresponds to one trial and contains:
+      features_seq: (T, 8) float32 — one 8-dim vector per step
+      labels_seq:   (T, 2) float32 — bolt_shift per step
+
+    The 8-dim feature at step t is:
+      [prev_spot_before_x, prev_spot_before_y,   (from step t-1: sim_after_position)
+       prev_delta_x,       prev_delta_y,          (from step t-1: command.coll_x/y)
+       prev_spot_after_x,  prev_spot_after_y,     (from step t-1: sim_after_bolt)
+       current_x,          current_y]             (from step t:   sim_after_position)
+
+    For t=1 (first real step), the "prev step" is step 0 (initial observation),
+    which already reveals the bolt shift via (spot_after - spot_before).
+    """
+    sequences: list[tuple[np.ndarray, np.ndarray]] = []
+
+    for exp in experiments:
+        exp_id = exp.get("experiment_id")
+        if not exp_id:
+            continue
+
+        for trial in exp.get("trials", []):
+            trial_id = trial.get("trial_id")
+            if not trial_id:
+                continue
+            if only_converged and not trial.get("converged", False):
+                continue
+
+            steps = get_trial_steps(exp_id, trial_id)
+            if not steps or len(steps) < 2:
+                continue
+
+            features_seq: list[np.ndarray] = []
+            labels_seq: list[np.ndarray] = []
+
+            for i in range(1, len(steps)):
+                prev_step = steps[i - 1]
+                curr_step = steps[i]
+
+                # Previous step features (6 dims)
+                prev_before = prev_step.get("sim_after_position") or {}
+                prev_cmd = prev_step.get("command") or {}
+                prev_after = prev_step.get("sim_after_bolt") or {}
+
+                # Current position (2 dims) from curr step's sim_after_position
+                curr_before = curr_step.get("sim_after_position") or {}
+
+                try:
+                    feat = np.array([
+                        float(prev_before.get("spot_center_x", 0.0)),
+                        float(prev_before.get("spot_center_y", 0.0)),
+                        float(prev_cmd.get("coll_x", 0.0)),
+                        float(prev_cmd.get("coll_y", 0.0)),
+                        float(prev_after.get("spot_center_x", 0.0)),
+                        float(prev_after.get("spot_center_y", 0.0)),
+                        float(curr_before.get("spot_center_x", 0.0)),
+                        float(curr_before.get("spot_center_y", 0.0)),
+                    ], dtype=np.float32)
+
+                    # Label: bolt_shift at current step
+                    curr_after = curr_step.get("sim_after_bolt") or {}
+                    label = np.array([
+                        float(curr_after.get("spot_center_x", 0.0))
+                        - float(curr_before.get("spot_center_x", 0.0)),
+                        float(curr_after.get("spot_center_y", 0.0))
+                        - float(curr_before.get("spot_center_y", 0.0)),
+                    ], dtype=np.float32)
+
+                    features_seq.append(feat)
+                    labels_seq.append(label)
+
+                except (KeyError, TypeError, ValueError) as e:
+                    logger.debug(f"Skipping step {i} in trial {trial_id}: {e}")
+                    continue
+
+            if len(features_seq) >= 1:
+                sequences.append((
+                    np.array(features_seq, dtype=np.float32),
+                    np.array(labels_seq, dtype=np.float32),
+                ))
+
+    logger.info(f"Collected {len(sequences)} trial sequences for LSTM training")
+    return sequences
+
+
 def normalize_features(features: np.ndarray) -> tuple[np.ndarray, dict[str, np.ndarray]]:
     """Normalize features using mean and std.
     

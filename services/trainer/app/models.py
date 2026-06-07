@@ -12,7 +12,8 @@ class TrainRequest(BaseModel):
         ..., min_length=1, description="List of experiment IDs to use for training data"
     )
     model_type: str = Field(
-        default="mlp", description="Model type: 'mlp' for MLP, 'baseline_only' for baseline controller"
+        default="mlp",
+        description="Model type: 'mlp', 'lstm', or 'baseline_only'",
     )
     epochs: int = Field(default=50, ge=1, le=500)
     batch_size: int = Field(default=32, ge=1, le=256)
@@ -22,7 +23,11 @@ class TrainRequest(BaseModel):
     )
     hidden_dim: int = Field(
         default=128, gt=0, le=2048,
-        description="MLP hidden layer size",
+        description="Hidden layer size (MLP or LSTM)",
+    )
+    num_layers: int = Field(
+        default=2, ge=1, le=8,
+        description="Number of LSTM layers (ignored for MLP)",
     )
     learning_rate: float = Field(default=1e-3, gt=0.0)
     only_converged: bool = Field(

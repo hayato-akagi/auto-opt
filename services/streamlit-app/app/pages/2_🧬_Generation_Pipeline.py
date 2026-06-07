@@ -69,6 +69,27 @@ with st.sidebar:
     max_steps = st.slider("最大ステップ", 1, 50, 10, disabled=is_running)
     tolerance = st.number_input("収束許容 (mm)", value=0.001, min_value=0.0001, step=0.0001, format="%.4f", disabled=is_running)
 
+    st.markdown("### 🤖 Gen0 コントローラー")
+    gen0_controller = st.radio(
+        "Gen0 に使うコントローラー",
+        options=["simple-controller", "adaptive-controller"],
+        index=0,
+        disabled=is_running,
+        help=(
+            "**simple-controller**: 比例制御のみ（デフォルト）\n\n"
+            "**adaptive-controller**: Step0の観測からbolt_shiftを推定して即座に補正。"
+            "収束が速く、質の高いGen0データが得られる可能性がある。"
+        ),
+    )
+    adaptive_alpha = 1.0
+    if gen0_controller == "adaptive-controller":
+        adaptive_alpha = st.slider(
+            "bolt_shift 推定の更新率 (alpha)",
+            min_value=0.1, max_value=1.0, value=1.0, step=0.1,
+            disabled=is_running,
+            help="1.0 = 最新観測のみ使用（線形ボルト向け）。小さいほど過去の推定を重視（非線形ボルト向け）。",
+        )
+
     st.markdown("### 🎲 初期位置・緩めノイズ")
     initial_coll_range = st.slider(
         "初期コリメータ位置ランダム幅 (mm)",
@@ -86,8 +107,30 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("## 🧠 モデル設定")
-    n_history = st.slider("履歴ステップ N", 1, 10, 3, disabled=is_running)
+    gen1plus_controller = st.radio(
+        "Gen1+ コントローラー (学習モデルを使用)",
+        options=["ai-controller (MLP)", "lstm-controller (LSTM)"],
+        index=0,
+        disabled=is_running,
+        help=(
+            "**ai-controller**: 固定幅ウィンドウ入力 MLP（デフォルト）\n\n"
+            "**lstm-controller**: ステップを順次処理する LSTM。"
+            "試行内で隠れ状態が更新されるため、環境への動的適応が期待できる。"
+        ),
+    )
+    use_lstm = gen1plus_controller.startswith("lstm")
+    gen1plus_controller_key = "lstm-controller" if use_lstm else "ai-controller"
+
+    n_history = st.slider(
+        "履歴ステップ N",
+        1, 10, 3,
+        disabled=is_running or use_lstm,
+        help="LSTM では固定窓を使わないため無効",
+    )
     hidden_dim = st.selectbox("隠れ層サイズ", [64, 128, 256, 512], index=1, disabled=is_running)
+    num_layers = 2
+    if use_lstm:
+        num_layers = st.slider("LSTM 層数", 1, 4, 2, disabled=is_running)
     epochs = st.slider("エポック数", 1, 100, 20, disabled=is_running)
     only_converged = st.checkbox("収束したtrialのみ学習", value=False, disabled=is_running)
     warm_start = st.checkbox(
@@ -153,6 +196,15 @@ with st.sidebar:
         }
 
     st.markdown("---")
+    st.markdown("## ⏱ タイムアウト設定")
+    train_timeout_sec = st.slider(
+        "学習タイムアウト (秒)",
+        min_value=300, max_value=7200, value=1800, step=300,
+        disabled=is_running,
+        help="1世代あたりの学習最大待機時間。LSTMは長めに設定してください。",
+    )
+
+    st.markdown("---")
     st.markdown("## 🔁 世代交代")
     n_generations = st.slider("総世代数", 1, 30, 5, disabled=is_running)
     target_success_rate = st.slider("目標合格率 (%)", 50, 100, 95, disabled=is_running) / 100
@@ -176,6 +228,9 @@ with col_a:
         payload = {
             "experiment_id": experiment_id.strip(),
             "config": {
+                "gen0_controller": gen0_controller,
+                "gen1plus_controller": gen1plus_controller_key,
+                "adaptive_alpha": float(adaptive_alpha),
                 "n_parallel_envs": int(n_parallel_envs),
                 "trials_per_env": int(trials_per_env),
                 "n_generations": int(n_generations),
@@ -194,6 +249,7 @@ with col_a:
                 "model_config_train": {
                     "n_history": int(n_history),
                     "hidden_dim": int(hidden_dim),
+                    "num_layers": int(num_layers),
                     "epochs": int(epochs),
                     "batch_size": 32,
                     "learning_rate": 1e-3,
@@ -207,7 +263,7 @@ with col_a:
                 "extra_experiment_ids": extra_experiment_ids,
                 "bolt_distribution": bolt_dist_payload,
                 "poll_interval_sec": 2.0,
-                "train_timeout_sec": 600.0,
+                "train_timeout_sec": float(train_timeout_sec),
             },
         }
         created = _client().start_pipeline(payload)
@@ -257,7 +313,13 @@ if status:
     st.progress(float(status.get("progress", 0.0) or 0.0))
 
     if status.get("error"):
-        st.error(f"エラー: {status['error']}")
+        st.error(f"パイプラインエラー: {status['error']}")
+
+    # 世代ごとの学習エラーを展開表示
+    for g in status.get("generations", []):
+        if g.get("status") == "failed" and g.get("error"):
+            with st.expander(f"🔴 Gen{g['gen_id']} エラー詳細", expanded=True):
+                st.code(g["error"], language="text")
 
     generations = status.get("generations", [])
     if generations:
@@ -562,8 +624,8 @@ if status:
                 # Target
                 fig.add_trace(go.Scatter(
                     x=[tgt_x], y=[tgt_y], mode="markers",
-                    marker=dict(symbol="star", size=18, color="gold",
-                                line=dict(color="black", width=1.5)),
+                    marker=dict(symbol="cross", size=18, color="red",
+                                line=dict(color="red", width=3)),
                     name="目標", showlegend=True,
                 ))
 

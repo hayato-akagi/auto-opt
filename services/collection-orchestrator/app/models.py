@@ -61,7 +61,7 @@ class CollectionJobCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     job_id: str | None = None
-    algorithm: Literal["simple-controller", "ai-controller"] = "simple-controller"
+    algorithm: Literal["simple-controller", "ai-controller", "adaptive-controller", "lstm-controller"] = "simple-controller"
     controller_config: ControllerConfig = Field(default_factory=ControllerConfig)
     target: TargetSpot
     initial_coll: InitialColl = Field(default_factory=InitialColl)
@@ -111,6 +111,7 @@ class PipelineModelConfig(BaseModel):
 
     n_history: int = Field(default=3, ge=1, le=10)
     hidden_dim: int = Field(default=128, gt=0, le=2048)
+    num_layers: int = Field(default=2, ge=1, le=8, description="LSTM layers (ignored for MLP)")
     epochs: int = Field(default=20, ge=1, le=500)
     batch_size: int = Field(default=32, ge=1, le=256)
     learning_rate: float = Field(default=1e-3, gt=0.0)
@@ -164,6 +165,18 @@ class BoltModelDistribution(BaseModel):
 class PipelineConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    gen0_controller: Literal["simple-controller", "adaptive-controller"] = Field(
+        default="simple-controller",
+        description="Controller used for Gen 0 data collection",
+    )
+    gen1plus_controller: Literal["ai-controller", "lstm-controller"] = Field(
+        default="ai-controller",
+        description="Controller used for Gen 1+ data collection",
+    )
+    adaptive_alpha: float = Field(
+        default=1.0, gt=0.0, le=1.0,
+        description="EMA weight for bolt_shift update in adaptive-controller (1.0 = latest obs only)",
+    )
     n_parallel_envs: int = Field(default=10, ge=1, le=1000)
     trials_per_env: int = Field(default=1, ge=1, le=50)
     n_generations: int = Field(default=5, ge=1, le=100)
@@ -191,7 +204,7 @@ class PipelineConfig(BaseModel):
         description="Additional experiment IDs from past pipeline runs to include in every training job",
     )
     poll_interval_sec: float = Field(default=2.0, gt=0.0)
-    train_timeout_sec: float = Field(default=600.0, gt=0.0)
+    train_timeout_sec: float = Field(default=1800.0, gt=0.0)
 
 
 class PipelineCreateRequest(BaseModel):

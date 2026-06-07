@@ -89,6 +89,7 @@ services:
       - TRAINER_SERVICE_URL=http://trainer:9008
       - MODEL_STORE_SERVICE_URL=http://model-store:9009
       - AI_CONTROLLER_SERVICE_URL=http://ai-controller:9006
+      - LSTM_CONTROLLER_SERVICE_URL=http://lstm-controller:9012
       - COLLECTION_ORCHESTRATOR_SERVICE_URL=http://collection-orchestrator:9007
     depends_on:
       recipe-service:
@@ -153,6 +154,8 @@ services:
     environment:
       - SIMPLE_CONTROLLER_URL=http://simple-controller:8003
       - AI_CONTROLLER_URL=http://ai-controller:9006
+      - ADAPTIVE_CONTROLLER_URL=http://adaptive-controller:8010
+      - LSTM_CONTROLLER_URL=http://lstm-controller:9012
       - TRAINER_URL=http://trainer:9008
       - RECIPE_SERVICE_URL=http://recipe-service:8002
       - DOWNSTREAM_TIMEOUT_SEC=30
@@ -161,6 +164,10 @@ services:
       simple-controller:
         condition: service_healthy
       ai-controller:
+        condition: service_healthy
+      adaptive-controller:
+        condition: service_healthy
+      lstm-controller:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9007/health"]
@@ -204,6 +211,46 @@ services:
       - models-data:/app/models
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9008/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  lstm-controller:
+    build:
+      context: ./services/lstm-controller
+      dockerfile: Dockerfile.cpu
+    ports:
+      - "9012:9012"
+    environment:
+      - RECIPE_SERVICE_URL=http://recipe-service:8002
+      - MODEL_STORE_URL=http://model-store:9009
+      - DOWNSTREAM_TIMEOUT_SEC=30
+      - DEFAULT_MODEL_TYPE=baseline_only
+    depends_on:
+      recipe-service:
+        condition: service_healthy
+      model-store:
+        condition: service_healthy
+    volumes:
+      - models-data:/app/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9012/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  adaptive-controller:
+    build: ./services/adaptive-controller
+    ports:
+      - "9010:8010"
+    environment:
+      - RECIPE_SERVICE_URL=http://recipe-service:8002
+      - DOWNSTREAM_TIMEOUT_SEC=30
+    depends_on:
+      recipe-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
       interval: 10s
       timeout: 5s
       retries: 3

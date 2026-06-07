@@ -46,6 +46,8 @@ def create_app(
     resolved_client = controller_client or ControllerClient(
         simple_controller_url=resolved_settings.simple_controller_url,
         ai_controller_url=resolved_settings.ai_controller_url,
+        adaptive_controller_url=resolved_settings.adaptive_controller_url,
+        lstm_controller_url=resolved_settings.lstm_controller_url,
         timeout_sec=resolved_settings.downstream_timeout_sec,
     )
     resolved_trainer = trainer_client or TrainerClient(
