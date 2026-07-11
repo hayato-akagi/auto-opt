@@ -132,13 +132,15 @@ class GenerationOrchestrator:
 
                 # 1) Collection phase
                 try:
-                    total, converged, steps_list, dist_list, trial_ids = await self._run_collection(
-                        gen_id=gen_id,
-                        experiment_id=experiment_id,
-                        controller=controller,
-                        model_path=last_model_path,
-                        config=config,
-                        envs=envs,
+                    total, converged, steps_list, dist_list, trial_ids, converged_flags = (
+                        await self._run_collection(
+                            gen_id=gen_id,
+                            experiment_id=experiment_id,
+                            controller=controller,
+                            model_path=last_model_path,
+                            config=config,
+                            envs=envs,
+                        )
                     )
                 except Exception as exc:  # pragma: no cover - defensive
                     gen.status = "failed"
@@ -154,6 +156,7 @@ class GenerationOrchestrator:
                 gen.steps_per_trial = steps_list
                 gen.final_distances = dist_list
                 gen.trial_ids = trial_ids
+                gen.converged_flags = converged_flags
 
                 # 2) Training phase (skip on last gen)
                 if gen_id < config.n_generations - 1:
@@ -231,11 +234,14 @@ class GenerationOrchestrator:
         model_path: str | None,
         config: PipelineConfig,
         envs: list[dict[str, Any]] | None,
-    ) -> tuple[int, int, list[int], list[float], list[str]]:
+    ) -> tuple[int, int, list[int], list[float], list[str], list[bool]]:
         """Run collection phase.
 
         Returns:
-            (total_trials, converged_trials, steps_per_trial, final_distances)
+            (total_trials, converged_trials, steps_per_trial, final_distances,
+             trial_ids, converged_flags)
+            final_distances, trial_ids, and converged_flags are aligned by
+            index (one entry per trial that actually produced a trial_id).
         """
         n_total = config.n_parallel_envs * config.trials_per_env
         base_seed = gen_id * 10_000
@@ -294,13 +300,14 @@ class GenerationOrchestrator:
 
         converged = sum(1 for r in results if r.get("converged"))
         steps_list = [int(r.get("steps") or 0) for r in results]
-        dist_list = [
-            float(r["final_distance"])
-            for r in results
-            if isinstance(r.get("final_distance"), (int, float))
-        ]
-        trial_ids = [str(r["trial_id"]) for r in results if r.get("trial_id")]
-        return n_total, converged, steps_list, dist_list, trial_ids
+
+        # Build trial_ids/final_distances/converged_flags from a single filter
+        # pass so the three lists stay aligned by index (same underlying trials).
+        trial_records = [r for r in results if r.get("trial_id")]
+        trial_ids = [str(r["trial_id"]) for r in trial_records]
+        dist_list = [float(r["final_distance"]) for r in trial_records]
+        converged_flags = [bool(r.get("converged")) for r in trial_records]
+        return n_total, converged, steps_list, dist_list, trial_ids, converged_flags
 
     async def _run_training(
         self,

@@ -109,6 +109,8 @@ class RecipeOrchestrator:
             after_bolt=after_bolt,
             sim_after_bolt=self._strip_images(sim_after_bolt),
             ai_step_log=command.ai_step_log,
+            observed_spot_x=command.observed_spot_x,
+            observed_spot_y=command.observed_spot_y,
         ).model_dump(exclude_none=True)
 
         saved_to = await self.storage.save_step(experiment_id, trial_id, step_record)

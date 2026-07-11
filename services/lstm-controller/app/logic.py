@@ -129,10 +129,14 @@ def compute_lstm_step(
             residual_y = 0.0
             new_hidden = lstm_hidden_state
 
-    # Safety: if residual is too large relative to baseline, ignore it
-    baseline_norm = math.hypot(baseline_x, baseline_y)
+    # Safety check: if residual is too large, ignore it.
+    # The threshold is anchored to the max per-step move (delta_clip), not to
+    # baseline_norm: near convergence baseline_norm shrinks to ~bolt-shift
+    # magnitude, which would make a baseline-relative threshold reject the
+    # residual exactly when the pre-compensation is most needed.
     residual_norm = math.hypot(residual_x, residual_y)
-    threshold = config.safety_threshold * baseline_norm + config.safety_bias
+    clip_norm = math.hypot(config.delta_clip_x, config.delta_clip_y)
+    threshold = config.safety_threshold * clip_norm + config.safety_bias
     safety_triggered = residual_norm > threshold
 
     if safety_triggered:

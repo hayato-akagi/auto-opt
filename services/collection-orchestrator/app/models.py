@@ -229,6 +229,10 @@ class GenerationResult(BaseModel):
     final_distances: list[float] = Field(default_factory=list)
     epoch_losses: list[float] = Field(default_factory=list)
     trial_ids: list[str] = Field(default_factory=list)
+    converged_flags: list[bool] = Field(
+        default_factory=list,
+        description="Per-trial convergence, aligned with trial_ids by index",
+    )
     started_at: str | None = None
     finished_at: str | None = None
     error: str | None = None

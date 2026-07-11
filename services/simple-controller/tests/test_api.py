@@ -17,7 +17,9 @@ class FakeRecipeClient:
         assert control["algorithm"] == "simple-controller"
         return {"trial_id": "trial_001"}
 
-    async def execute_step(self, experiment_id: str, trial_id: str, coll_x: float, coll_y: float) -> dict:
+    async def execute_step(
+        self, experiment_id: str, trial_id: str, coll_x: float, coll_y: float, **kwargs
+    ) -> dict:
         self.step_calls.append((coll_x, coll_y))
 
         if len(self.step_calls) == 1:

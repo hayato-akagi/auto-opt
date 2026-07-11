@@ -10,10 +10,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from .clients import RecipeServiceClient
 from .data import collect_training_data, collect_training_sequences, normalize_features
 from .models import TrainRequest, TrainJobStatus, TrainMetrics, EpochLog
-from .train import TrainingConfig, train_model, train_lstm_sequences, save_model
+from .train import (
+    TrainingConfig,
+    train_model,
+    train_lstm_sequences,
+    save_model,
+    load_feature_stats,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,11 +88,22 @@ async def run_training_job(
             if not sequences:
                 raise ValueError("No training sequences collected for LSTM")
 
-            all_features = __import__("numpy").vstack([s[0] for s in sequences])
-            stats = {
-                "mean": all_features.mean(axis=0),
-                "std": all_features.std(axis=0) + 1e-8,
-            }
+            # When warm-starting, reuse the previous checkpoint's normalization
+            # stats: the warm-started weights only make sense under the input
+            # scale they were trained with, and recomputing fresh stats from
+            # (possibly differently distributed) new data would shift that
+            # scale out from under them.
+            stats = (
+                load_feature_stats(request.init_from_model_path)
+                if request.init_from_model_path
+                else None
+            )
+            if stats is None:
+                all_features = np.vstack([s[0] for s in sequences])
+                stats = {
+                    "mean": all_features.mean(axis=0),
+                    "std": all_features.std(axis=0) + 1e-8,
+                }
 
             logger.info(
                 f"[{train_job_id}] LSTM training: {len(sequences)} sequences, "
@@ -97,11 +116,16 @@ async def run_training_job(
             job.updated_at = _utc_now_iso()
 
             model, metrics = await _train_lstm_with_progress(
-                sequences, config, stats, train_job_id, jobs_dict
+                sequences,
+                config,
+                stats,
+                train_job_id,
+                jobs_dict,
+                init_from_model_path=request.init_from_model_path,
             )
         else:
             # MLP / baseline_only path (original)
-            features, labels = collect_training_data(
+            features, labels, groups = collect_training_data(
                 experiments_data,
                 get_trial_steps,
                 n_history=request.n_history,
@@ -119,7 +143,17 @@ async def run_training_job(
             }
             job.updated_at = _utc_now_iso()
 
-            normalized_features, stats = normalize_features(features)
+            # Warm-start reuses the previous checkpoint's normalization stats
+            # (see LSTM branch above for why); otherwise compute fresh stats.
+            stats = (
+                load_feature_stats(request.init_from_model_path)
+                if request.init_from_model_path
+                else None
+            )
+            if stats is not None:
+                normalized_features = (features - stats["mean"]) / (stats["std"] + 1e-8)
+            else:
+                normalized_features, stats = normalize_features(features)
 
             logger.info(
                 f"[{train_job_id}] Starting training: model_type={request.model_type}, "
@@ -134,6 +168,7 @@ async def run_training_job(
                 train_job_id,
                 jobs_dict,
                 init_from_model_path=request.init_from_model_path,
+                groups=groups,
             )
         
         logger.info(f"[{train_job_id}] Training completed: final_loss={metrics['final_train_loss']:.6f}")
@@ -203,6 +238,7 @@ async def _train_with_progress(
     train_job_id: str,
     jobs_dict: dict[str, TrainJobStatus],
     init_from_model_path: str | None = None,
+    groups: np.ndarray | None = None,
 ):
     """Train model in a thread pool executor so the event loop stays unblocked.
 
@@ -219,6 +255,7 @@ async def _train_with_progress(
         model_type=model_type,
         config=config,
         init_from_model_path=init_from_model_path,
+        groups=groups,
     )
     model, metrics = await loop.run_in_executor(None, fn)
 
@@ -241,10 +278,17 @@ async def _train_lstm_with_progress(
     feature_stats: dict,
     train_job_id: str,
     jobs_dict: dict,
+    init_from_model_path: str | None = None,
 ) -> tuple:
     """LSTM training in a thread pool executor (same reason as _train_with_progress)."""
     loop = asyncio.get_event_loop()
-    fn = functools.partial(train_lstm_sequences, sequences, config, feature_stats)
+    fn = functools.partial(
+        train_lstm_sequences,
+        sequences,
+        config,
+        feature_stats,
+        init_from_model_path=init_from_model_path,
+    )
     model, metrics = await loop.run_in_executor(None, fn)
 
     job = jobs_dict[train_job_id]

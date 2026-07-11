@@ -267,6 +267,8 @@ class RecipeStorage:
                         step_record["sim_after_position"]
                     ),
                     "sim_after_bolt": self._sim_summary(step_record["sim_after_bolt"]),
+                    "observed_spot_x": step_record.get("observed_spot_x"),
+                    "observed_spot_y": step_record.get("observed_spot_y"),
                 }
             )
         return summaries

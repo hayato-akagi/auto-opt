@@ -110,12 +110,14 @@ async def run_control_loop(
 
     for _ in range(request.max_steps):
         pre_x, pre_y, _ = _extract_spot(last_step["sim_after_position"])
+        observed_spot_x = pre_x + state.perturb_x
+        observed_spot_y = pre_y + state.perturb_y
 
         # Build 8-dim LSTM features from the previous step result
         lstm_features = make_lstm_features(
             prev_step=last_step,
-            current_spot_x=pre_x + state.perturb_x,
-            current_spot_y=pre_y + state.perturb_y,
+            current_spot_x=observed_spot_x,
+            current_spot_y=observed_spot_y,
         )
 
         # LSTM inference: returns decision + updated hidden state
@@ -125,8 +127,8 @@ async def run_control_loop(
             target_y=request.target.spot_center_y,
             current_coll_x=state.commanded_x,
             current_coll_y=state.commanded_y,
-            spot_pre_x=pre_x + state.perturb_x,
-            spot_pre_y=pre_y + state.perturb_y,
+            spot_pre_x=observed_spot_x,
+            spot_pre_y=observed_spot_y,
             lstm_features=lstm_features,
             lstm_hidden_state=state.lstm_hidden_state,
             model_manager=model_manager,
@@ -151,6 +153,8 @@ async def run_control_loop(
             state.commanded_x,
             state.commanded_y,
             ai_step_log=ai_step_log,
+            observed_spot_x=observed_spot_x,
+            observed_spot_y=observed_spot_y,
         )
         steps_executed += 1
         last_step = step_result

@@ -163,6 +163,42 @@ def create_model(model_type: str, config: TrainingConfig) -> nn.Module:
         raise ValueError(f"Unknown model_type: {model_type}")
 
 
+def _group_train_val_split(
+    n_samples: int,
+    groups: np.ndarray | None,
+    val_split: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Split sample indices into train/val, keeping every group intact.
+
+    Splitting per-sample (ignoring which trial each sample came from) lets
+    strongly-correlated adjacent steps from the same trial land on both
+    sides of the split, so a low val loss doesn't mean the model
+    generalizes across trials. When `groups` is provided, whole groups
+    (trials) are assigned to val instead.
+    """
+    if groups is None or val_split <= 0.0:
+        n_val = int(n_samples * val_split)
+        n_train = n_samples - n_val
+        indices = np.random.permutation(n_samples)
+        return indices[:n_train], indices[n_train:]
+
+    unique_groups = np.random.permutation(np.unique(groups))
+    n_val_target = int(n_samples * val_split)
+
+    val_groups: list[int] = []
+    n_val_actual = 0
+    for g in unique_groups:
+        if n_val_actual >= n_val_target:
+            break
+        val_groups.append(int(g))
+        n_val_actual += int(np.sum(groups == g))
+
+    val_mask = np.isin(groups, val_groups)
+    val_idx = np.where(val_mask)[0]
+    train_idx = np.where(~val_mask)[0]
+    return train_idx, val_idx
+
+
 def train_model(
     features: np.ndarray,
     labels: np.ndarray,
@@ -170,37 +206,35 @@ def train_model(
     config: TrainingConfig | None = None,
     feature_stats: dict[str, np.ndarray] | None = None,
     init_from_model_path: Path | str | None = None,
+    groups: np.ndarray | None = None,
 ) -> tuple[nn.Module, dict[str, Any]]:
     """Train bolt shift prediction model.
-    
+
     Args:
         features: (N, 8) normalized feature array
         labels: (N, 2) label array (bolt shifts in mm)
         model_type: "mlp" or "baseline_only"
         config: Training configuration
         feature_stats: Normalization statistics (mean, std)
-        
+        groups: Optional (N,) trial id per sample, for trial-level val split
+
     Returns:
         model: Trained PyTorch model
         metrics: Training metrics dict
     """
     if torch is None:
         raise RuntimeError("PyTorch not available")
-    
+
     if config is None:
         config = TrainingConfig()
-    
+
     device = torch.device(config.device)
-    
-    # Split train/val
+
+    # Split train/val (trial-level when groups is provided, see docstring)
     n_samples = len(features)
-    n_val = int(n_samples * config.val_split)
-    n_train = n_samples - n_val
-    
-    indices = np.random.permutation(n_samples)
-    train_idx = indices[:n_train]
-    val_idx = indices[n_train:]
-    
+    train_idx, val_idx = _group_train_val_split(n_samples, groups, config.val_split)
+    n_val = len(val_idx)
+
     X_train = torch.from_numpy(features[train_idx]).float().to(device)
     y_train = torch.from_numpy(labels[train_idx]).float().to(device)
     X_val = torch.from_numpy(features[val_idx]).float().to(device) if n_val > 0 else None
@@ -295,6 +329,7 @@ def train_lstm_sequences(
     sequences: list[tuple[np.ndarray, np.ndarray]],
     config: TrainingConfig,
     feature_stats: dict[str, np.ndarray],
+    init_from_model_path: Path | str | None = None,
 ) -> tuple[nn.Module, dict[str, Any]]:
     """Train BoltShiftLSTM on per-trial sequences using BPTT.
 
@@ -303,6 +338,8 @@ def train_lstm_sequences(
                    features_seq: (T, 8), labels_seq: (T, 2)
         config: Training configuration (hidden_dim, num_layers, epochs, lr, device)
         feature_stats: Pre-computed {"mean": (8,), "std": (8,)} for normalization
+        init_from_model_path: Optional .pt path to warm-start weights from
+            (must match architecture)
 
     Returns:
         (model, metrics)
@@ -320,6 +357,24 @@ def train_lstm_sequences(
         num_layers=config.num_layers,
     ).to(device)
 
+    # Warm-start: load weights from previous checkpoint if compatible
+    if init_from_model_path:
+        try:
+            ckpt = torch.load(init_from_model_path, map_location=device, weights_only=False)
+            prev_hidden = ckpt.get("hidden_dim")
+            prev_num_layers = ckpt.get("num_layers")
+            if prev_hidden == config.hidden_dim and prev_num_layers == config.num_layers:
+                model.load_state_dict(ckpt["model_state_dict"])
+                logger.info(f"LSTM warm-start: loaded weights from {init_from_model_path}")
+            else:
+                logger.warning(
+                    f"LSTM warm-start skipped: architecture mismatch "
+                    f"(prev hidden={prev_hidden}, num_layers={prev_num_layers} vs "
+                    f"new hidden={config.hidden_dim}, num_layers={config.num_layers})"
+                )
+        except Exception as exc:
+            logger.warning(f"LSTM warm-start failed (continuing from scratch): {exc}")
+
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
 
@@ -331,14 +386,21 @@ def train_lstm_sequences(
         y = torch.from_numpy(label_seq).float().to(device)
         tensors.append((x.unsqueeze(0), y.unsqueeze(0)))  # (1, T, 8), (1, T, 2)
 
+    # Trial-level val split: each sequence is already one trial, so splitting
+    # at the sequence level keeps held-out trials fully separate from train.
+    train_tensor_idx, val_tensor_idx = _group_train_val_split(
+        len(tensors), groups=None, val_split=config.val_split
+    )
+
     epoch_losses: list[float] = []
+    val_losses: list[float] = []
 
     for epoch in range(config.epochs):
         model.train()
         total_loss = 0.0
-        indices = np.random.permutation(len(tensors))
+        order = np.random.permutation(train_tensor_idx)
 
-        for idx in indices:
+        for idx in order:
             x, y = tensors[idx]
             optimizer.zero_grad()
             preds, _ = model(x)   # (1, T, 2)
@@ -347,19 +409,32 @@ def train_lstm_sequences(
             optimizer.step()
             total_loss += loss.item()
 
-        avg_loss = total_loss / max(len(tensors), 1)
+        avg_loss = total_loss / max(len(train_tensor_idx), 1)
         epoch_losses.append(avg_loss)
+
+        if len(val_tensor_idx) > 0:
+            model.eval()
+            val_total = 0.0
+            with torch.no_grad():
+                for idx in val_tensor_idx:
+                    x, y = tensors[idx]
+                    preds, _ = model(x)
+                    val_total += criterion(preds, y).item()
+            val_losses.append(val_total / len(val_tensor_idx))
+        else:
+            val_losses.append(0.0)
 
         if (epoch + 1) % 10 == 0 or epoch == 0:
             logger.info(
-                f"LSTM Epoch {epoch + 1}/{config.epochs} - loss: {avg_loss:.6f}"
+                f"LSTM Epoch {epoch + 1}/{config.epochs} - "
+                f"loss: {avg_loss:.6f}, val_loss: {val_losses[-1]:.6f}"
             )
 
     return model, {
         "epoch_losses": epoch_losses,
-        "val_losses": [],
+        "val_losses": val_losses,
         "final_train_loss": epoch_losses[-1] if epoch_losses else 0.0,
-        "final_val_loss": 0.0,
+        "final_val_loss": val_losses[-1] if val_losses else 0.0,
     }
 
 
@@ -413,6 +488,30 @@ def save_model(
     logger.info(f"Model saved to {save_path}")
 
 
+def load_feature_stats(model_path: Path | str) -> dict[str, np.ndarray] | None:
+    """Peek at a checkpoint's normalization stats without instantiating a model.
+
+    Used when warm-starting: the new model's weights only make sense under
+    the same input scale they were trained with, so warm-started runs should
+    reuse the previous checkpoint's feature_mean/feature_std rather than
+    recomputing fresh statistics from the new (possibly differently
+    distributed) training data.
+    """
+    if torch is None:
+        raise RuntimeError("PyTorch not available")
+    try:
+        checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
+    except Exception as exc:
+        logger.warning(f"Could not read feature stats from {model_path}: {exc}")
+        return None
+
+    mean = checkpoint.get("feature_mean")
+    std = checkpoint.get("feature_std")
+    if mean is None or std is None:
+        return None
+    return {"mean": mean, "std": std}
+
+
 def load_model(load_path: Path, device: str = "cpu") -> tuple[nn.Module, dict[str, Any]]:
     """Load model from file.
     
@@ -434,22 +533,25 @@ def load_model(load_path: Path, device: str = "cpu") -> tuple[nn.Module, dict[st
     hidden_dim = checkpoint.get("hidden_dim", 128)
     max_history_steps = checkpoint.get("max_history_steps", DEFAULT_MAX_HISTORY_STEPS)
     n_history = checkpoint.get("n_history", 3)
-    
+    num_layers = checkpoint.get("num_layers", 2)
+
     config = TrainingConfig(
         device=device,
         hidden_dim=hidden_dim,
         max_history_steps=max_history_steps,
         n_history=n_history,
+        num_layers=num_layers,
     )
     model = create_model(model_type, config)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
-    
+
     metadata = {
         "model_type": model_type,
         "hidden_dim": hidden_dim,
         "max_history_steps": max_history_steps,
         "n_history": n_history,
+        "num_layers": num_layers,
         "feature_mean": checkpoint.get("feature_mean"),
         "feature_std": checkpoint.get("feature_std"),
         "metadata": checkpoint.get("metadata", {}),

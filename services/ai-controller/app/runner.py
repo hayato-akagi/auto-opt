@@ -101,14 +101,22 @@ async def run_control_loop(
     for _ in range(request.max_steps):
         pre_x, pre_y, _ = _extract_spot(last_step["sim_after_position"])
 
+        # Record the most recently completed step as history *before* using it
+        # for inference, so the model sees the same history it was trained on
+        # (the trainer's target step i always has access to steps[0:i]).
+        prev_steps_for_inference.append(last_step)
+
+        observed_spot_x = pre_x + state.perturb_x
+        observed_spot_y = pre_y + state.perturb_y
+
         action = compute_ai_step(
             config=request.config,
             target_x=request.target.spot_center_x,
             target_y=request.target.spot_center_y,
             current_coll_x=state.commanded_x,
             current_coll_y=state.commanded_y,
-            spot_pre_x=pre_x + state.perturb_x,
-            spot_pre_y=pre_y + state.perturb_y,
+            spot_pre_x=observed_spot_x,
+            spot_pre_y=observed_spot_y,
             model_manager=model_manager,
             prev_steps=prev_steps_for_inference,
         )
@@ -131,9 +139,10 @@ async def run_control_loop(
             state.commanded_x,
             state.commanded_y,
             ai_step_log=ai_step_log,
+            observed_spot_x=observed_spot_x,
+            observed_spot_y=observed_spot_y,
         )
         steps_executed += 1
-        prev_steps_for_inference.append(last_step)  # Save completed step for next iteration
         last_step = step_result
 
         final_post_x, final_post_y, final_post_rms = _extract_spot(step_result["sim_after_bolt"])

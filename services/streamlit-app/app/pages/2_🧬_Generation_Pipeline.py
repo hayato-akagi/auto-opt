@@ -67,7 +67,7 @@ with st.sidebar:
     n_parallel_envs = st.slider("並列環境数", 1, 200, 10, disabled=is_running)
     trials_per_env = st.slider("環境あたり試行数", 1, 10, 1, disabled=is_running)
     max_steps = st.slider("最大ステップ", 1, 50, 10, disabled=is_running)
-    tolerance = st.number_input("収束許容 (mm)", value=0.001, min_value=0.0001, step=0.0001, format="%.4f", disabled=is_running)
+    tolerance = st.number_input("収束許容 (mm)", value=0.05, min_value=0.0001, step=0.0001, format="%.4f", disabled=is_running)
 
     st.markdown("### 🤖 Gen0 コントローラー")
     gen0_controller = st.radio(
@@ -504,12 +504,43 @@ if status:
 
         gen_data = next(g for g in gens_with_trials if g["gen_id"] == traj_gen_id)
         all_trial_ids = gen_data.get("trial_ids", [])
+        converged_flags = gen_data.get("converged_flags") or []
+        # converged_by_trial[t] is True/False if known, None for older runs
+        # recorded before converged_flags was tracked (length mismatch).
+        if len(converged_flags) == len(all_trial_ids):
+            converged_by_trial = dict(zip(all_trial_ids, converged_flags))
+        else:
+            converged_by_trial = {}
+
+        def _traj_label(t: str) -> str:
+            conv = converged_by_trial.get(t)
+            mark = "✅" if conv is True else "❌" if conv is False else "❔"
+            return f"{mark} …{t[-12:]}"
+
+        n_converged = sum(1 for v in converged_by_trial.values() if v)
+        select_col1, select_col2, select_col3 = st.columns([2, 1, 1])
+        with select_col1:
+            st.caption(
+                f"✅ 成功 {n_converged} / {len(all_trial_ids)} 件"
+                if converged_by_trial else "（この世代は成否情報が未記録です）"
+            )
+        with select_col2:
+            if st.button(
+                "✅ 成功試行のみ選択", key="traj_select_converged",
+                disabled=not converged_by_trial,
+            ):
+                st.session_state["traj_trial_select"] = [
+                    t for t in all_trial_ids if converged_by_trial.get(t) is True
+                ]
+        with select_col3:
+            if st.button("🔄 選択をリセット", key="traj_select_reset"):
+                st.session_state["traj_trial_select"] = all_trial_ids[:min(5, len(all_trial_ids))]
 
         selected_trial_ids = st.multiselect(
             f"試行を選択（全 {len(all_trial_ids)} 件）",
             options=all_trial_ids,
             default=all_trial_ids[:min(5, len(all_trial_ids))],
-            format_func=lambda t: f"…{t[-12:]}",
+            format_func=_traj_label,
             key="traj_trial_select",
         )
 
@@ -560,7 +591,9 @@ if status:
                     if not steps:
                         continue
                     color = _TRAJ_COLORS[i % len(_TRAJ_COLORS)]
-                    label = f"…{tid[-10:]}"
+                    conv = converged_by_trial.get(tid)
+                    mark = "✅" if conv is True else "❌" if conv is False else "❔"
+                    label = f"{mark} …{tid[-10:]}"
 
                     pxs, pys, qxs, qys = [], [], [], []
                     for s in steps:

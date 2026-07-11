@@ -122,7 +122,7 @@ with st.sidebar:
     n_trials = st.slider("試行回数", 1, 100, 10)
     max_steps = st.slider("最大ステップ", 1, 50, 10)
     tolerance = st.number_input(
-        "収束許容 (mm)", value=0.001, min_value=0.0001, step=0.0001, format="%.4f"
+        "収束許容 (mm)", value=0.05, min_value=0.0001, step=0.0001, format="%.4f"
     )
     base_seed = st.number_input("乱数 seed (base)", value=0, step=1)
 

@@ -125,6 +125,8 @@ async def run_control_loop(request: ControlRunRequest, client: RecipeClient) -> 
             trial_id,
             state.commanded_x,
             state.commanded_y,
+            observed_spot_x=pre_x + state.perturb_x,
+            observed_spot_y=pre_y + state.perturb_y,
         )
         steps_executed += 1
         last_step = step_result

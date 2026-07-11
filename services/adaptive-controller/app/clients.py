@@ -31,18 +31,31 @@ class RecipeClient:
         )
 
     async def execute_step(
-        self, experiment_id: str, trial_id: str, coll_x: float, coll_y: float
+        self,
+        experiment_id: str,
+        trial_id: str,
+        coll_x: float,
+        coll_y: float,
+        *,
+        observed_spot_x: float | None = None,
+        observed_spot_y: float | None = None,
     ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "coll_x": coll_x,
+            "coll_y": coll_y,
+            "options": {
+                "return_ray_hits": False,
+                "return_images": False,
+            },
+        }
+        if observed_spot_x is not None:
+            payload["observed_spot_x"] = observed_spot_x
+        if observed_spot_y is not None:
+            payload["observed_spot_y"] = observed_spot_y
+
         return await self._post_json(
             f"{self.recipe_service_url}/experiments/{experiment_id}/trials/{trial_id}/steps",
-            {
-                "coll_x": coll_x,
-                "coll_y": coll_y,
-                "options": {
-                    "return_ray_hits": False,
-                    "return_images": False,
-                },
-            },
+            payload,
             "recipe-service",
         )
 

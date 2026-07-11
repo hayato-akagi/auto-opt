@@ -51,7 +51,7 @@ class ControlRunRequest(BaseModel):
     target: TargetSpot
     initial_coll: InitialColl = Field(default_factory=InitialColl)
     max_steps: int = Field(default=20, ge=0)
-    tolerance: float = Field(default=0.001, gt=0.0)
+    tolerance: float = Field(default=0.05, gt=0.0)
     random_seed: int | None = Field(default=None, ge=0)
     bolt_model_override: dict[str, Any] | None = Field(
         default=None,

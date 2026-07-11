@@ -45,12 +45,18 @@ def create_mock_data() -> tuple[list[dict], callable]:
                 "command": {"coll_x": -0.001, "coll_y": -0.0006},
                 "sim_after_position": {"spot_center_x": 0.02, "spot_center_y": 0.015},
                 "sim_after_bolt": {"spot_center_x": 0.025, "spot_center_y": 0.020},
+                # = step 0's sim_after_position (no perturbation in this mock)
+                "observed_spot_x": 0.05,
+                "observed_spot_y": 0.03,
             },
             {
                 "step_index": 2,
                 "command": {"coll_x": -0.0005, "coll_y": -0.0004},
                 "sim_after_position": {"spot_center_x": 0.005, "spot_center_y": 0.003},
                 "sim_after_bolt": {"spot_center_x": 0.008, "spot_center_y": 0.005},
+                # = step 1's sim_after_position
+                "observed_spot_x": 0.02,
+                "observed_spot_y": 0.015,
             },
         ],
         ("exp_001", "trial_002"): [
@@ -65,6 +71,9 @@ def create_mock_data() -> tuple[list[dict], callable]:
                 "command": {"coll_x": 0.0008, "coll_y": 0.001},
                 "sim_after_position": {"spot_center_x": -0.01, "spot_center_y": -0.015},
                 "sim_after_bolt": {"spot_center_x": -0.008, "spot_center_y": -0.012},
+                # = step 0's sim_after_position
+                "observed_spot_x": -0.04,
+                "observed_spot_y": -0.05,
             },
         ],
     }
@@ -92,16 +101,17 @@ def test_data_collection():
     logger.info("=" * 60)
     
     experiments, get_trial_steps = create_mock_data()
-    
-    features, labels = collect_training_data(experiments, get_trial_steps)
-    
+
+    features, labels, groups = collect_training_data(experiments, get_trial_steps)
+
     logger.info(f"Features shape: {features.shape}")
     logger.info(f"Labels shape: {labels.shape}")
     logger.info(f"Feature sample:\n{features[0]}")
     logger.info(f"Label sample:\n{labels[0]}")
-    
-    assert features.shape[1] == 8, "Features should be 8-dimensional"
+
+    assert features.shape[1] == 62, "Features should be max_history*6+2 = 62-dimensional"
     assert labels.shape[1] == 2, "Labels should be 2-dimensional"
+    assert len(groups) == len(features), "One group id per sample"
     assert len(features) == len(labels), "Features and labels should have same length"
     
     # Expected: 2 step pairs from trial_001 + 1 step pair from trial_002 = 3 samples
@@ -195,7 +205,7 @@ def test_model_save_load(model, config: TrainingConfig, stats: dict):
     
     # Test inference
     import torch
-    test_input = torch.randn(1, 8)
+    test_input = torch.randn(1, model.input_dim)
     with torch.no_grad():
         orig_output = model(test_input)
         loaded_output = loaded_model(test_input)

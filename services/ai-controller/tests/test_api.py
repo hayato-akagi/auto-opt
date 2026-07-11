@@ -26,6 +26,8 @@ class FakeRecipeClient:
         coll_y: float,
         *,
         ai_step_log: dict | None = None,
+        observed_spot_x: float | None = None,
+        observed_spot_y: float | None = None,
     ) -> dict:
         self.step_calls.append((coll_x, coll_y, ai_step_log))
 

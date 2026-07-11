@@ -160,6 +160,15 @@ class StepExecuteRequest(BaseModel):
     coll_y: float
     options: StepOptions = Field(default_factory=StepOptions)
     ai_step_log: AiStepLog | None = None
+    observed_spot_x: float | None = Field(
+        default=None,
+        description=(
+            "Spot position the controller actually observed before deciding this "
+            "command (previous step's post-release position plus release-time "
+            "noise). None for the first step of a trial (no prior observation)."
+        ),
+    )
+    observed_spot_y: float | None = Field(default=None)
 
 
 class StepExecuteResponse(BaseModel):
@@ -182,6 +191,8 @@ class StepRecord(BaseModel):
     after_bolt: dict[str, float]
     sim_after_bolt: dict[str, Any]
     ai_step_log: AiStepLog | None = None
+    observed_spot_x: float | None = None
+    observed_spot_y: float | None = None
 
 
 class StepSummary(BaseModel):
@@ -189,6 +200,8 @@ class StepSummary(BaseModel):
     command: dict[str, float]
     sim_after_position: dict[str, float | None]
     sim_after_bolt: dict[str, float | None]
+    observed_spot_x: float | None = None
+    observed_spot_y: float | None = None
 
 
 class StepListResponse(BaseModel):

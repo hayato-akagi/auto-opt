@@ -48,32 +48,41 @@ def extract_features_with_history(
     max_history: int = MAX_HISTORY_STEPS,
 ) -> np.ndarray | None:
     """Extract feature vector with variable history length.
-    
+
     The output is always max_history*6+2 = 62 dimensions (with zero-padding for
     unused history slots). The actual data uses the latest n_history steps before
     target_step_index, plus the current spot position from target_step_index.
-    
+
     Args:
         steps: All steps of the trial (in order)
         target_step_index: Index of the step we're predicting (0-based)
         n_history: Number of history steps to use (1-10)
         max_history: Model's max history (fixed at 10)
-        
+
     Returns:
         Feature vector of shape (max_history*6+2,) or None if extraction failed
     """
     if n_history < 1 or n_history > max_history:
         raise ValueError(f"n_history must be in [1, {max_history}], got {n_history}")
-    
+
     if target_step_index >= len(steps):
         return None
-    
-    # Get current spot (before adjustment) from target step
+
+    # Current spot position must be the value the controller actually observed
+    # *before* deciding the command for target_step_index (previous step's
+    # post-release position plus release-time noise). Using target_step's own
+    # sim_after_position here would leak information only available after the
+    # very command being predicted was already applied (bolt_shift is close to
+    # a deterministic function of that post-command position), which the
+    # controller cannot know at decision time.
     target_step = steps[target_step_index]
-    target_before = target_step.get("sim_after_position", {})
     try:
-        current_x = float(target_before.get("spot_center_x", 0.0))
-        current_y = float(target_before.get("spot_center_y", 0.0))
+        current_x = target_step.get("observed_spot_x")
+        current_y = target_step.get("observed_spot_y")
+        if current_x is None or current_y is None:
+            return None
+        current_x = float(current_x)
+        current_y = float(current_y)
     except (TypeError, ValueError):
         return None
     
@@ -118,43 +127,51 @@ def collect_training_data(
     get_trial_steps: callable,
     n_history: int = 1,
     only_converged: bool = False,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Collect training data from experiments with variable history length.
-    
+
     The feature vector is always MAX_INPUT_DIM (62) dimensions, with the latest
     n_history steps used as actual data and earlier slots zero-padded.
-    
+
     Args:
         experiments: List of experiment dicts with experiment_id and trials
         get_trial_steps: Function(experiment_id, trial_id) -> list[dict]
         n_history: Number of past steps to use as features (1-10)
         only_converged: If True, only use trials that converged
-        
+
     Returns:
         features (N, MAX_INPUT_DIM): Feature vectors
         labels (N, 2): [bolt_shift_x, bolt_shift_y] from spot difference
+        groups (N,): integer trial id per sample, for trial-level val splits
     """
     features_list: list[np.ndarray] = []
     labels_list: list[np.ndarray] = []
-    
+    groups_list: list[int] = []
+    trial_group_id = 0
+
     for exp in experiments:
         exp_id = exp.get("experiment_id")
         if not exp_id:
             continue
-        
+
         trials = exp.get("trials", [])
         for trial in trials:
             trial_id = trial.get("trial_id")
             if not trial_id:
                 continue
-            
+
             if only_converged and not trial.get("converged", False):
                 continue
-            
+
             steps = get_trial_steps(exp_id, trial_id)
             if not steps or len(steps) < 2:
                 continue
-            
+
+            # Each trial gets its own group id so that samples from the same
+            # trial (strongly correlated adjacent steps) never span both the
+            # train and validation split.
+            trial_group_id += 1
+
             # For each step (starting from index 1), use prior steps as history
             for i in range(1, len(steps)):
                 feature = extract_features_with_history(
@@ -162,30 +179,33 @@ def collect_training_data(
                 )
                 if feature is None:
                     continue
-                
+
                 label = _extract_label(steps[i])
                 if label is None:
                     continue
-                
+
                 features_list.append(feature)
                 labels_list.append(label)
-    
+                groups_list.append(trial_group_id)
+
     if not features_list:
         logger.warning("No training samples collected")
         return (
             np.zeros((0, MAX_INPUT_DIM), dtype=np.float32),
             np.zeros((0, 2), dtype=np.float32),
+            np.zeros((0,), dtype=np.int64),
         )
-    
+
     features = np.array(features_list, dtype=np.float32)
     labels = np.array(labels_list, dtype=np.float32)
-    
+    groups = np.array(groups_list, dtype=np.int64)
+
     logger.info(
         f"Collected {len(features)} training samples "
         f"(n_history={n_history}, input_dim={features.shape[1]}) "
         f"from {len(experiments)} experiments"
     )
-    return features, labels
+    return features, labels, groups
 
 
 def _extract_label(curr_step: dict[str, Any]) -> np.ndarray | None:
@@ -227,7 +247,13 @@ def collect_training_sequences(
       [prev_spot_before_x, prev_spot_before_y,   (from step t-1: sim_after_position)
        prev_delta_x,       prev_delta_y,          (from step t-1: command.coll_x/y)
        prev_spot_after_x,  prev_spot_after_y,     (from step t-1: sim_after_bolt)
-       current_x,          current_y]             (from step t:   sim_after_position)
+       current_x,          current_y]             (from step t: observed_spot_x/y)
+
+    current_x/y is the position the controller actually observed before
+    deciding the command for step t (previous step's post-release position
+    plus release-time noise) -- NOT step t's own sim_after_position, which
+    is only known after that command was already applied and would leak
+    the (near-deterministic) target of the bolt_shift prediction.
 
     For t=1 (first real step), the "prev step" is step 0 (initial observation),
     which already reveals the bolt shift via (spot_after - spot_before).
@@ -262,7 +288,19 @@ def collect_training_sequences(
                 prev_cmd = prev_step.get("command") or {}
                 prev_after = prev_step.get("sim_after_bolt") or {}
 
-                # Current position (2 dims) from curr step's sim_after_position
+                # Current position (2 dims): what the controller actually
+                # observed before deciding curr_step's command. Must NOT be
+                # curr_step's own sim_after_position (see docstring).
+                observed_x = curr_step.get("observed_spot_x")
+                observed_y = curr_step.get("observed_spot_y")
+                if observed_x is None or observed_y is None:
+                    logger.debug(
+                        f"Skipping step {i} in trial {trial_id}: missing observed_spot"
+                    )
+                    continue
+
+                # The true settled position of curr_step's own command, used
+                # only to compute the ground-truth label below.
                 curr_before = curr_step.get("sim_after_position") or {}
 
                 try:
@@ -273,8 +311,8 @@ def collect_training_sequences(
                         float(prev_cmd.get("coll_y", 0.0)),
                         float(prev_after.get("spot_center_x", 0.0)),
                         float(prev_after.get("spot_center_y", 0.0)),
-                        float(curr_before.get("spot_center_x", 0.0)),
-                        float(curr_before.get("spot_center_y", 0.0)),
+                        float(observed_x),
+                        float(observed_y),
                     ], dtype=np.float32)
 
                     # Label: bolt_shift at current step

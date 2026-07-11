@@ -38,6 +38,8 @@ class RecipeClient:
 		coll_y: float,
 		*,
 		ai_step_log: dict[str, Any] | None = None,
+		observed_spot_x: float | None = None,
+		observed_spot_y: float | None = None,
 	) -> dict[str, Any]:
 		payload: dict[str, Any] = {
 			"coll_x": coll_x,
@@ -49,6 +51,10 @@ class RecipeClient:
 		}
 		if ai_step_log is not None:
 			payload["ai_step_log"] = ai_step_log
+		if observed_spot_x is not None:
+			payload["observed_spot_x"] = observed_spot_x
+		if observed_spot_y is not None:
+			payload["observed_spot_y"] = observed_spot_y
 
 		return await self._post_json(
 			f"{self.recipe_service_url}/experiments/{experiment_id}/trials/{trial_id}/steps",
