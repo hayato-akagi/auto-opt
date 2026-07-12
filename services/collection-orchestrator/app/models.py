@@ -260,3 +260,74 @@ class PipelineStatusResponse(BaseModel):
 
 class PipelineListResponse(BaseModel):
     pipelines: list[PipelineStatusResponse]
+
+
+# ---------- Generalization Sweep ----------
+
+
+class GeneralizationLevel(BaseModel):
+    """One point in a generalization sweep: a named bolt_model distribution."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1)
+    bolt_distribution: BoltModelDistribution
+
+
+class SweepCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    experiment_id: str = Field(..., min_length=1)
+    base_config: PipelineConfig = Field(
+        ...,
+        description=(
+            "Template pipeline config shared by every level. Its bolt_distribution "
+            "is ignored — each level supplies its own."
+        ),
+    )
+    levels: list[GeneralizationLevel] = Field(..., min_length=2)
+    eval_n_envs: int = Field(default=20, ge=1, le=500)
+    eval_trials_per_env: int = Field(default=1, ge=1, le=20)
+    max_concurrent_eval_cells: int = Field(default=3, ge=1, le=25)
+
+
+class SweepLevelStatus(BaseModel):
+    name: str
+    pipeline_id: str
+    status: str = "pending"  # pending|running|completed|failed
+    model_path: str | None = None
+    train_success_rate: float | None = None
+    error: str | None = None
+
+
+class SweepCellResult(BaseModel):
+    train_level: str
+    eval_level: str
+    status: str = "pending"  # pending|running|completed|failed|skipped
+    total_trials: int = 0
+    converged_trials: int = 0
+    success_rate: float | None = None
+    final_distances: list[float] = Field(default_factory=list)
+    error: str | None = None
+
+
+class SweepCreateResponse(BaseModel):
+    sweep_id: str
+    status: str
+    experiment_id: str
+    created_at: str
+
+
+class SweepStatusResponse(BaseModel):
+    sweep_id: str
+    experiment_id: str
+    status: str  # running|completed|completed_with_errors|failed
+    levels: list[SweepLevelStatus] = Field(default_factory=list)
+    matrix: list[SweepCellResult] = Field(default_factory=list)
+    started_at: str
+    finished_at: str | None = None
+    error: str | None = None
+
+
+class SweepListResponse(BaseModel):
+    sweeps: list[SweepStatusResponse]

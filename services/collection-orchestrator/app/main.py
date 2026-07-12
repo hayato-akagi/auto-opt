@@ -20,8 +20,13 @@ from .models import (
     PipelineCreateResponse,
     PipelineListResponse,
     PipelineStatusResponse,
+    SweepCreateRequest,
+    SweepCreateResponse,
+    SweepListResponse,
+    SweepStatusResponse,
 )
 from .storage import InMemoryJobStore
+from .sweep_manager import SweepOrchestrator
 
 
 def _now_iso() -> str:
@@ -43,6 +48,7 @@ def create_app(
     resolved_settings = settings or Settings.from_env()
     resolved_store = store or InMemoryJobStore()
     resolved_pipelines = InMemoryJobStore()
+    resolved_sweeps = InMemoryJobStore()
     resolved_client = controller_client or ControllerClient(
         simple_controller_url=resolved_settings.simple_controller_url,
         ai_controller_url=resolved_settings.ai_controller_url,
@@ -193,6 +199,70 @@ def create_app(
         return PipelineListResponse(
             pipelines=[PipelineStatusResponse.model_validate(r) for r in records]
         )
+
+    # ---------------- Generalization sweep endpoints ----------------
+
+    def _generate_sweep_id(counter: int) -> str:
+        now = datetime.now(timezone.utc)
+        return f"sweep_{now:%Y%m%d_%H%M%S}_{counter:04d}"
+
+    app.state._sweep_counter = 0
+
+    @app.post("/sweeps", response_model=SweepCreateResponse, status_code=202)
+    async def create_sweep(payload: SweepCreateRequest) -> SweepCreateResponse:
+        app.state._sweep_counter += 1
+        sweep_id = _generate_sweep_id(app.state._sweep_counter)
+        created_at = _now_iso()
+
+        record = {
+            "sweep_id": sweep_id,
+            "experiment_id": payload.experiment_id,
+            "status": "running",
+            "levels": [],
+            "matrix": [],
+            "started_at": created_at,
+            "finished_at": None,
+            "error": None,
+        }
+        try:
+            resolved_sweeps.create(sweep_id, record)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        orchestrator = SweepOrchestrator(
+            controller_client=resolved_client,
+            trainer_client=resolved_trainer,
+            recipe_client=resolved_recipe,
+            sweeps_store=resolved_sweeps,
+            pipelines_store=resolved_pipelines,
+        )
+
+        asyncio.create_task(
+            orchestrator.run(
+                sweep_id=sweep_id,
+                experiment_id=payload.experiment_id,
+                request=payload,
+            )
+        )
+
+        return SweepCreateResponse(
+            sweep_id=sweep_id,
+            status="running",
+            experiment_id=payload.experiment_id,
+            created_at=created_at,
+        )
+
+    @app.get("/sweeps/{sweep_id}", response_model=SweepStatusResponse)
+    async def get_sweep(sweep_id: str) -> SweepStatusResponse:
+        record = resolved_sweeps.get(sweep_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"sweep not found: {sweep_id}")
+        return SweepStatusResponse.model_validate(record)
+
+    @app.get("/sweeps", response_model=SweepListResponse)
+    async def list_sweeps(status: str | None = Query(default=None)) -> SweepListResponse:
+        records = resolved_sweeps.list(status=status)
+        return SweepListResponse(sweeps=[SweepStatusResponse.model_validate(r) for r in records])
 
     return app
 

@@ -531,6 +531,38 @@ class RecipeApiClient:
         st.error("Collection Orchestrator Service のパイプライン一覧レスポンス形式が不正です")
         return None
 
+    # Generalization sweep methods
+    def start_sweep(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Start a generalization sweep (train N bolt_distribution levels, then cross-evaluate)."""
+        return self._request_external_service(
+            "POST",
+            self._collection_orchestrator_url("/sweeps"),
+            "Collection Orchestrator Service",
+            payload,
+        )
+
+    def get_sweep_status(self, sweep_id: str) -> dict[str, Any] | None:
+        """Poll status of a sweep (per-level training progress + eval matrix)."""
+        return self._request_external_service(
+            "GET",
+            self._collection_orchestrator_url(f"/sweeps/{sweep_id}"),
+            "Collection Orchestrator Service",
+        )
+
+    def list_sweeps(self) -> list[dict[str, Any]] | None:
+        data = self._request_external_service(
+            "GET",
+            self._collection_orchestrator_url("/sweeps"),
+            "Collection Orchestrator Service",
+        )
+        if data is None:
+            return None
+        sweeps = data.get("sweeps")
+        if isinstance(sweeps, list):
+            return sweeps
+        st.error("Collection Orchestrator Service のスイープ一覧レスポンス形式が不正です")
+        return None
+
     # Generic service health/capability methods
     def get_service_health(self, service: str) -> tuple[bool, dict[str, Any] | None, str | None]:
         targets = {

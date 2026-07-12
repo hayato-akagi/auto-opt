@@ -7,13 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 from datetime import datetime, timezone
 from typing import Any
 
 from .clients import ControllerClient, RecipeClient, TrainerClient
+from .eval_runner import run_trial_batch
 from .models import (
-    BoltModelDistribution,
     GenerationResult,
     PipelineConfig,
 )
@@ -24,43 +23,6 @@ logger = logging.getLogger(__name__)
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _sample_range(rng: random.Random, lo_hi: tuple[float, float]) -> float:
-    lo, hi = lo_hi
-    if lo == hi:
-        return float(lo)
-    return rng.uniform(float(lo), float(hi))
-
-
-def _sample_bolt_unit(rng: random.Random, unit) -> dict[str, float]:
-    return {
-        "x0_bias_x": _sample_range(rng, unit.x0_bias_x),
-        "x0_bias_y": _sample_range(rng, unit.x0_bias_y),
-        "a_x": _sample_range(rng, unit.a_x),
-        "b_x": _sample_range(rng, unit.b_x),
-        "a_y": _sample_range(rng, unit.a_y),
-        "b_y": _sample_range(rng, unit.b_y),
-        "noise_ratio_min_x": unit.noise_ratio_min_x,
-        "noise_ratio_max_x": unit.noise_ratio_max_x,
-        "noise_ratio_min_y": unit.noise_ratio_min_y,
-        "noise_ratio_max_y": unit.noise_ratio_max_y,
-    }
-
-
-def _sample_envs(
-    distribution: BoltModelDistribution,
-    n_envs: int,
-) -> list[dict[str, Any]]:
-    """Deterministically sample n_envs bolt_model dicts from the distribution."""
-    rng = random.Random(distribution.seed)
-    envs: list[dict[str, Any]] = []
-    for _ in range(n_envs):
-        envs.append({
-            "upper": _sample_bolt_unit(rng, distribution.upper),
-            "lower": _sample_bolt_unit(rng, distribution.lower),
-        })
-    return envs
 
 
 class GenerationOrchestrator:
@@ -99,14 +61,6 @@ class GenerationOrchestrator:
             # Verify experiment exists
             await self._recipe.get_experiment(experiment_id)
 
-            # Pre-sample environments (bolt_model variants) once per pipeline
-            envs: list[dict[str, Any]] | None = None
-            if config.bolt_distribution is not None:
-                envs = _sample_envs(config.bolt_distribution, config.n_parallel_envs)
-                logger.info(
-                    f"[{pipeline_id}] sampled {len(envs)} envs from bolt_distribution"
-                )
-
             generations: list[GenerationResult] = []
             self._update(pipeline_id, generations=generations, status="running")
 
@@ -139,7 +93,6 @@ class GenerationOrchestrator:
                             controller=controller,
                             model_path=last_model_path,
                             config=config,
-                            envs=envs,
                         )
                     )
                 except Exception as exc:  # pragma: no cover - defensive
@@ -233,7 +186,6 @@ class GenerationOrchestrator:
         controller: str,
         model_path: str | None,
         config: PipelineConfig,
-        envs: list[dict[str, Any]] | None,
     ) -> tuple[int, int, list[int], list[float], list[str], list[bool]]:
         """Run collection phase.
 
@@ -242,72 +194,38 @@ class GenerationOrchestrator:
              trial_ids, converged_flags)
             final_distances, trial_ids, and converged_flags are aligned by
             index (one entry per trial that actually produced a trial_id).
+
+        Env sampling (when config.bolt_distribution is set) is deterministic in
+        (seed, n_envs), so calling run_trial_batch fresh each generation yields
+        the same envs every time rather than needing to precompute them once.
         """
-        n_total = config.n_parallel_envs * config.trials_per_env
-        base_seed = gen_id * 10_000
-
-        # Build per-controller config payload
-        ctrl_config: dict[str, Any] = config.controller_config.model_dump()
-        if controller == "ai-controller":
-            ctrl_config["model_type"] = "mlp"
-            ctrl_config["model_path"] = model_path
-            ctrl_config["n_history"] = config.model_config_train.n_history
-        elif controller == "lstm-controller":
-            ctrl_config["model_type"] = "lstm"
-            ctrl_config["model_path"] = model_path
-        elif controller == "adaptive-controller":
-            ctrl_config["alpha"] = config.adaptive_alpha
-
-        semaphore = asyncio.Semaphore(max(1, config.n_parallel_envs))
-
-        async def _one(trial_idx: int) -> dict[str, Any]:
-            env_idx = trial_idx // config.trials_per_env  # round-robin per env
-            bolt_override = envs[env_idx] if envs is not None else None
-
-            # Randomize initial coll position per trial using a separate seed namespace
-            # to avoid correlation with the controller's random_seed.
-            if config.initial_coll_range_x > 0.0 or config.initial_coll_range_y > 0.0:
-                init_rng = random.Random(base_seed + trial_idx + 1_000_000)
-                initial_coll = {
-                    "coll_x": config.initial_coll.coll_x + init_rng.uniform(
-                        -config.initial_coll_range_x, config.initial_coll_range_x
-                    ),
-                    "coll_y": config.initial_coll.coll_y + init_rng.uniform(
-                        -config.initial_coll_range_y, config.initial_coll_range_y
-                    ),
-                }
-            else:
-                initial_coll = config.initial_coll.model_dump()
-
-            payload = {
-                "experiment_id": experiment_id,
-                "algorithm": controller,
-                "config": ctrl_config,
-                "target": config.target.model_dump(),
-                "initial_coll": initial_coll,
-                "max_steps": config.max_steps,
-                "tolerance": config.tolerance,
-                "random_seed": base_seed + trial_idx,
-                "bolt_model_override": bolt_override,
-            }
-            async with semaphore:
-                try:
-                    return await self._controller.run_control(controller, payload)
-                except Exception as exc:
-                    return {"error": str(exc), "converged": False}
-
-        results = await asyncio.gather(*[_one(i) for i in range(n_total)])
-
-        converged = sum(1 for r in results if r.get("converged"))
-        steps_list = [int(r.get("steps") or 0) for r in results]
-
-        # Build trial_ids/final_distances/converged_flags from a single filter
-        # pass so the three lists stay aligned by index (same underlying trials).
-        trial_records = [r for r in results if r.get("trial_id")]
-        trial_ids = [str(r["trial_id"]) for r in trial_records]
-        dist_list = [float(r["final_distance"]) for r in trial_records]
-        converged_flags = [bool(r.get("converged")) for r in trial_records]
-        return n_total, converged, steps_list, dist_list, trial_ids, converged_flags
+        result = await run_trial_batch(
+            controller_client=self._controller,
+            experiment_id=experiment_id,
+            algorithm=controller,
+            controller_config=config.controller_config,
+            target=config.target,
+            initial_coll=config.initial_coll,
+            max_steps=config.max_steps,
+            tolerance=config.tolerance,
+            n_envs=config.n_parallel_envs,
+            trials_per_env=config.trials_per_env,
+            base_seed=gen_id * 10_000,
+            model_path=model_path,
+            n_history=config.model_config_train.n_history,
+            adaptive_alpha=config.adaptive_alpha,
+            bolt_distribution=config.bolt_distribution,
+            initial_coll_range_x=config.initial_coll_range_x,
+            initial_coll_range_y=config.initial_coll_range_y,
+        )
+        return (
+            result.total_trials,
+            result.converged_trials,
+            result.steps_per_trial,
+            result.final_distances,
+            result.trial_ids,
+            result.converged_flags,
+        )
 
     async def _run_training(
         self,
