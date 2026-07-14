@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import time
 
+import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -317,7 +319,7 @@ if status:
     if not gens_with_trials:
         st.info("trial_ids がまだ記録されていません。次回パイプライン実行から自動収集されます。")
     else:
-        traj_col1, traj_col2, traj_col3 = st.columns([2, 1, 1])
+        traj_col1, traj_col2, traj_col3, traj_col4 = st.columns([2, 1, 1, 1])
         with traj_col1:
             traj_gen_id = st.selectbox(
                 "世代",
@@ -329,6 +331,11 @@ if status:
             traj_target_x = st.number_input("目標X (mm)", value=0.0, format="%.4f", key="traj_tx")
         with traj_col3:
             traj_target_y = st.number_input("目標Y (mm)", value=0.0, format="%.4f", key="traj_ty")
+        with traj_col4:
+            traj_tolerance = st.number_input(
+                "許容範囲 (mm)", value=0.05, min_value=0.0, step=0.001,
+                format="%.4f", key="traj_tol",
+            )
 
         gen_data = next(g for g in gens_with_trials if g["gen_id"] == traj_gen_id)
         all_trial_ids = gen_data.get("trial_ids", [])
@@ -392,7 +399,9 @@ if status:
                 "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
             ]
 
-            def _build_traj_fig(t_steps: dict, space: str, tgt_x: float, tgt_y: float) -> go.Figure:
+            def _build_traj_fig(
+                t_steps: dict, space: str, tgt_x: float, tgt_y: float, tolerance: float = 0.0,
+            ) -> go.Figure:
                 fig = go.Figure()
 
                 def _pts(step: dict) -> tuple[float, float, float, float]:
@@ -486,9 +495,22 @@ if status:
                 fig.add_trace(go.Scatter(
                     x=[tgt_x], y=[tgt_y], mode="markers",
                     marker=dict(symbol="cross", size=18, color="red",
-                                line=dict(color="red", width=3)),
+                                line=dict(color="red", width=1)),
                     name="目標", showlegend=True,
                 ))
+
+                # Tolerance circle (spot space only; tolerance is defined on
+                # spot-space distance, see runner.py final_distance)
+                if space == "spot" and tolerance > 0:
+                    theta = np.linspace(0, 2 * np.pi, 64)
+                    fig.add_trace(go.Scatter(
+                        x=tgt_x + tolerance * np.cos(theta),
+                        y=tgt_y + tolerance * np.sin(theta),
+                        mode="lines",
+                        line=dict(color="red", dash="dot", width=1),
+                        name=f"許容範囲 ({tolerance:.4f} mm)",
+                        showlegend=True,
+                    ))
 
                 ax_label = "スポット位置 (mm)" if space == "spot" else "コリメータ位置 (mm)"
                 fig.update_layout(
@@ -506,14 +528,46 @@ if status:
             tab_spot, tab_coll = st.tabs(["📍 スポット空間", "🔧 コリメータ空間"])
             with tab_spot:
                 st.plotly_chart(
-                    _build_traj_fig(trials_steps, "spot", traj_target_x, traj_target_y),
+                    _build_traj_fig(trials_steps, "spot", traj_target_x, traj_target_y, traj_tolerance),
                     use_container_width=True,
                 )
             with tab_coll:
                 st.plotly_chart(
-                    _build_traj_fig(trials_steps, "coll", traj_target_x, traj_target_y),
+                    _build_traj_fig(trials_steps, "coll", traj_target_x, traj_target_y, traj_tolerance),
                     use_container_width=True,
                 )
+
+            # -----------------------------------------------------------------
+            # CSV export
+            # -----------------------------------------------------------------
+            csv_rows = []
+            for tid, steps in trials_steps.items():
+                conv = converged_by_trial.get(tid)
+                for s in steps:
+                    cmd = s.get("command") or {}
+                    pre = s.get("sim_after_position") or {}
+                    pst = s.get("sim_after_bolt") or {}
+                    csv_rows.append({
+                        "trial_id": tid,
+                        "converged": conv,
+                        "step_index": s.get("step_index"),
+                        "command_coll_x": cmd.get("coll_x"),
+                        "command_coll_y": cmd.get("coll_y"),
+                        "spot_pre_x": pre.get("spot_center_x"),
+                        "spot_pre_y": pre.get("spot_center_y"),
+                        "spot_post_x": pst.get("spot_center_x"),
+                        "spot_post_y": pst.get("spot_center_y"),
+                        "observed_spot_x": s.get("observed_spot_x"),
+                        "observed_spot_y": s.get("observed_spot_y"),
+                    })
+            csv_df = pd.DataFrame(csv_rows)
+            st.download_button(
+                "📥 CSV ダウンロード(軌跡データ)",
+                data=csv_df.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"trajectory_{exp_id_for_traj}_gen{traj_gen_id}.csv",
+                mime="text/csv",
+                key="traj_csv_download",
+            )
         elif selected_trial_ids:
             st.info("「📥 ステップデータを取得」を押してください。")
 

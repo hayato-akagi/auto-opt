@@ -127,7 +127,7 @@ with col_graph:
         xaxis=dict(range=[-0.6, 0.6]),
         yaxis=dict(range=[-0.6, 0.6], scaleanchor="x", scaleratio=1),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig)
 
 with col_info:
     mag = np.sqrt(U ** 2 + V ** 2)
@@ -218,7 +218,7 @@ if experiments is None:
 
 if experiments:
     df = pd.DataFrame(experiments)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, hide_index=True)
     st.caption("💡 `experiment_id` を **🧬 世代交代パイプライン** ページで使用してください。")
 else:
     st.info("実験はまだ登録されていません。")
